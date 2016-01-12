@@ -25,7 +25,15 @@ Borg Collector needs the following environment variables defined (e.g. .env for 
  - Install postgresql-client-x.x and gdal-bin. For EPSG autodetection in ESRI shapefiles, it's recommended you find the following files on the internet and add them to your GDAL share path (e.g. /usr/share/gdal/1.10): cubewerx_extra.wkt esri_extra.wkt epsg_esri.wkt.gz
  - If required, do an initial syncdb to create the Django model schema.
 
-
+## Rest API
+### Create a harvest job.
+```
+   Url : https://host:port/api/jobs/
+   Data: {"publishes":["publish name1","publish name2"]}
+   Response:
+      Success: {"status":true,"message":{"publish name1":"job id : 1","publish name2":"job id : 2"}}
+      Failed: {"status":false,"message":{"publish name1":"job id : 1","publish name2":"Already have a waiting job"}}
+```
 ## Model info
 
  - Input tables define ogr2ogr vrt sources from which to import data
