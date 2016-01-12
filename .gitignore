@@ -1,0 +1,12 @@
+.hg
+.hgignore
+*.swp
+*.pyc
+*.env
+*.orig
+venv
+staticfiles
+logs
+dpaw-borg-state
+download
+master
