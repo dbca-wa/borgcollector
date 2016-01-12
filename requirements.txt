@@ -2,7 +2,7 @@ Django==1.7.4
 django-suit
 django-extensions
 django-codemirror-widget
-django-reversion
+django-reversion==1.9.3
 django-redis
 SQLAlchemy
 six
