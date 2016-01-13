@@ -9,6 +9,7 @@ from borg_utils.borg_config import BorgConfiguration
 
 from tablemanager.models import Publish,downloadFileSystemStorage
 from harvest.jobstates import JobState
+from borg_utils.jobintervals import Manually
 
 def get_full_data_file_name(instance,filename):
     if instance.publish.workspace.workspace_as_schema:
