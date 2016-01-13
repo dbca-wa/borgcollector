@@ -12,7 +12,7 @@ from borg_utils.jobintervals import Triggered
 
 class JobResource(DjangoResource):
     def is_authenticated(self):
-        return self.request.user.is_authenticated() or True
+        return self.request.user.is_authenticated()
 
     @staticmethod
     def urls():
