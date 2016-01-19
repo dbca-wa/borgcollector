@@ -1796,7 +1796,7 @@ class Publish(Transform,SignalEnable):
 
     name = models.SlugField(max_length=255, unique=True, help_text="Name of Publish", validators=[validate_slug])
     workspace = models.ForeignKey(Workspace)
-    interval = models.CharField(max_length=64, choices=JobInterval.all_options(), default=Weekly.instance().name)
+    interval = models.CharField(max_length=64, choices=JobInterval.publish_options(), default=Weekly.instance().name)
     status = models.CharField(max_length=32, choices=PublishStatus.all_options(),default=EnabledStatus.instance().name)
     kmi_title = models.CharField(max_length=512,null=True,editable=True,blank=True)
     kmi_abstract = models.TextField(null=True,editable=True,blank=True)
