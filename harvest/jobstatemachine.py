@@ -98,7 +98,7 @@ class JobStatemachine(object):
         return (True,job.id)
 
     @staticmethod
-    def create_jobs(interval_choice):
+    def create_jobs(interval_choice,job_batch_id=None):
         """
         create the jobs based on publish status
         All jobs will be sorted agaist with publish.priority
@@ -106,7 +106,7 @@ class JobStatemachine(object):
         job = None
         log = None
         jobs = []
-        job_batch_id = interval_choice.job_batch_id
+        job_batch_id = job_batch_id or interval_choice.job_batch_id
 
         check_job = Job(id=-1,batch_id="CK" + job_batch_id) if interval_choice == Realtime.instance() else None
         up_to_date = False
@@ -158,6 +158,8 @@ class JobStatemachine(object):
                 log.job_id = job.id
                 log.save()
 
+        return len(jobs)
+
 
     @staticmethod
     def send_user_action(job_id,job_state,user_action):
@@ -183,30 +185,31 @@ class JobStatemachine(object):
             raise Exception("Job is on the state {0} instead of required state {1}".format(job.state, required_state_name))
 
     @staticmethod
-    def running(interval):
-        """
-        continuous running
-        """
-        if interval <= 0:
-            raise Exception("Interval({0}) must be a positive integer.")
-
-        first_run = True
-        while(True):
-            logger.info("Begin to scan and run all jobs.")
-            JobStatemachine.run_all_jobs(first_run)
-            first_run = False
-            time.sleep(interval)
-
-    @staticmethod
     def run_all_jobs(first_run=True):
         """
         run all jobs sequentially
         """
+        succeed_jobs = 0
+        failed_jobs = 0
+        ignored_jobs = 0
+        error_jobs = 0
         for j in Job.objects.exclude(state__in = [Failed.instance().name,Completed.instance().name]).order_by('id'):
             try:
                 JobStatemachine.run(j,first_run)
+                if j.state == "Completed":
+                    if j.launched is None:
+                        ignored_jobs += 1
+                    else:
+                        succeed_jobs += 1
+                elif j.state == "Failed":
+                    failed_jobs += 1
+                else:
+                    error_jobs += 1
             except:
                 logger.error("job(id={0},name={1}) runs into a exception{2}".format(j.id,j.publish.name,JobState.get_exception_message()))
+                error_jobs += 1
+
+        return (succeed_jobs,failed_jobs,ignored_jobs,error_jobs)
 
     @staticmethod
     def run_job(job_id,step=False):

@@ -1,4 +1,6 @@
 import os
+import socket
+from datetime import timedelta
 
 from django.db import models
 from django.db.models.signals import pre_delete
@@ -16,7 +18,60 @@ def get_full_data_file_name(instance,filename):
         return 'full_data/{0}/{1}/{2}/{3}'.format(instance.publish.workspace.publish_channel.name,instance.publish.workspace.name,instance.batch_id,filename)
     else:
         return 'full_data/{0}/{1}/{2}'.format(instance.publish.workspace.publish_channel.name,instance.batch_id,filename)
+  
+class Process(models.Model):
+    current_server=socket.getfqdn()
+    current_pid=os.getpid()
+
+    name = models.CharField(max_length=32,null=False,editable=False)
+    desc = models.CharField(max_length=256,null=False,editable=False)
+    server = models.CharField(max_length=64,null=False,editable=False)
+    pid = models.IntegerField(max_length=64,null=False,editable=False)
+    status = models.CharField(max_length=32,null=False,editable=False)
+    last_message = models.TextField(null=True,editable=False)
+    last_starttime = models.DateTimeField(null=True, editable=False)
+    last_endtime = models.DateTimeField(null=True, editable=False)
+    next_scheduled_time = models.DateTimeField(null=False, editable=False)
+
+    @property
+    def is_alive(self):
+        """
+        check whether process is alive or not.
+        """
+        if self.pid:
+            if self.current_server == self.server and self.current_pid == self.pid:
+                #same process
+                return True
+            else:
+                if self.current_server == self.server:
+                    #same server
+                    if not os.path.exists(os.path.join("/proc",str(self.pid))):
+                        return False
+                #not the same process, check the heatbeat
+                if self.status == "shutdown":
+                    return False
+                else:
+                    return True
+        else:
+            return False
+
+    @property
+    def can_run(self):
+        """
+        At any time, only one process can run .
+        Return True, if can run; otherwise return false
+        """
+        if self.is_alive:
+            #the proess is alive, can run only if the process is the same process as the checking process
+            return self.current_server == self.server and self.current_pid == self.pid
+        else:
+            return True
+
+    @property
+    def same_process(self):
+        return self.current_server == self.server and self.current_pid == self.pid
         
+
 class Job(models.Model):
     batch_id = models.CharField(max_length=64,null=False,editable=False)
     publish = models.ForeignKey(Publish,editable=False)

@@ -59,3 +59,5 @@ class HarvestJobCleaner(object):
             self.logger.info("{0} outdated job have been deleted.".format(deleted_jobs))
         else:
             self.logger.info("Not find any outdated jobs.")
+
+        return deleted_jobs

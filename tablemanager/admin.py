@@ -799,7 +799,7 @@ class PublishAdmin(VersionAdmin,JobFields):
     disable_publish.short_description = "Disable selected publishs"
 
     def create_harvest_job(self,request,queryset):
-        job_batch_id = Manually.instance().job_batch_id
+        job_batch_id = Manually.instance().job_batch_id()
         result = None
         failed_objects = []
         for publish in queryset:
