@@ -22,7 +22,7 @@ class JobResource(DjangoResource):
      
     @skip_prepare
     def create(self):
-        job_batch_id = Triggered.instance().job_batch_id
+        job_batch_id = Triggered.instance().job_batch_id()
         resp = {"status":True, "message":{}}
         result = None
         for name in self.data.get('publishes') or []:

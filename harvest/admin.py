@@ -1,7 +1,7 @@
 from django.contrib import admin
 
 from harvest.models import (
-    Job, JobLog
+    Job, JobLog,Process
 )
 from borg.admin import site
 from harvest.jobstates import JobState,JobStateOutcome,Failed,Completed
@@ -174,8 +174,32 @@ class JobLogAdmin(admin.ModelAdmin):
     class Media:
         js = ('/static/js/admin-model-readonly.js',)
 
+class ProcessAdmin(admin.ModelAdmin):
+    readonly_fields = ("id","name","desc","server","pid","status","next_scheduled_time","last_starttime","last_endtime","_last_message")
+    list_display = ("id","name","server","pid","status","next_scheduled_time","last_starttime","last_endtime","last_message")
+    search_fields = ["job_id"]
+
+    def _last_message(self,o):
+        if o.message:
+            return "<p style='white-space:pre'>" + o.last_message + "</p>"
+        else:
+            return ''
+
+    _last_message.allow_tags = True
+    _last_message.short_description = "Message"
+
+    def has_add_permission(self,request):
+        return False
+
+    def has_delete_permission(self,request,obj=None):
+        return False
+
+    class Media:
+        js = ('/static/js/admin-model-readonly.js',)
+
 site.register(Job, JobAdmin)
 #site.register(FailingJob, FailingJobAdmin)
 site.register(RunningJob, RunningJobAdmin)
 site.register(EffectiveJob, EffectiveJobAdmin)
 site.register(JobLog, JobLogAdmin)
+site.register(Process, ProcessAdmin)
