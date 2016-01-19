@@ -24,7 +24,7 @@ class HarvestJobCleaner(object):
         #find all publishes which has published at least one time
         outdated_date = None
         if self.expire_days:
-            outdated_date = timezone.now() - timedelta(self.expire_days)
+            outdated_date = timezone.localtime(timezone.now()) - timedelta(self.expire_days)
             self.logger.info("Begin to clean the jobs finished before {0}, but at least {1} latest successful jobs for each publish will be preserved.".format(outdated_date,self.min_jobs))
         else:
             self.logger.info("Begin to clean all jobs, except {1} latest successful jobs for each publish".format(outdated_date,self.min_jobs))

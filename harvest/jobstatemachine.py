@@ -106,7 +106,7 @@ class JobStatemachine(object):
         job = None
         log = None
         jobs = []
-        job_batch_id = job_batch_id or interval_choice.job_batch_id
+        job_batch_id = job_batch_id or interval_choice.job_batch_id()
 
         check_job = Job(id=-1,batch_id="CK" + job_batch_id) if interval_choice == Realtime.instance() else None
         up_to_date = False

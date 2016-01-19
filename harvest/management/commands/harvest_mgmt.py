@@ -115,7 +115,7 @@ class CreateJob(RepeatedJob):
 
     @property
     def last_message(self):
-        return "Created {} harvest jobs."
+        return "{} harvest jobs created."
 
     def execute(self,time):
         return JobStatemachine.create_jobs(self._interval,RepeatedJob.job_batch_id)
@@ -163,7 +163,7 @@ class CleanJob(RepeatedJob):
 
     @property
     def last_message(self):
-        return "{} outdated jobs have been removed."
+        return "{} outdated jobs have been removed.expire_days={}, min_jobs={}".format("{}",self._options["expire_days"],self._options["min_jobs"])
 
     def execute(self,time):
         return HarvestJobCleaner(self._options["expire_days"],self._options["min_jobs"]).clean()

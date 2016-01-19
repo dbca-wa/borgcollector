@@ -46,7 +46,7 @@ class HarvestModifyTime(object):
             logger.info("Begin to havest datasource's last modify time.")
             try:
                 counter = self._harvest_ds_time()
-                logger.info("{} datasources have been changed after latest harvesting.")
+                logger.info("{} datasources have been changed after latest harvesting.".format(counter))
             except:
                 logger.info("Failed to havest datasource's last modify time.{0}{1}".format(os.linesep,traceback.format_exc()))
 
