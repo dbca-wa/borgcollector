@@ -299,5 +299,3 @@ class Command(BaseCommand):
                 logger.info("sleep until {}".format(timezone.localtime(min_next_run_time)))
                 time.sleep(sleep_times)
 
-
-        return 0
