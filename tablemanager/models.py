@@ -1662,7 +1662,7 @@ class Workspace(BorgModel,SignalEnable):
     """
     Analogous to a workspace in GeoServer.
     """
-    name = models.SlugField(max_length=255, unique=True, help_text="Name of workspace", validators=[validate_slug])
+    name = models.SlugField(max_length=255, help_text="Name of workspace", validators=[validate_slug])
     publish_channel = models.ForeignKey(PublishChannel)
     allow_authenticated = models.BooleanField(default=False)
 
