@@ -1664,7 +1664,13 @@ class Workspace(BorgModel,SignalEnable):
     """
     name = models.SlugField(max_length=255, help_text="Name of workspace", validators=[validate_slug])
     publish_channel = models.ForeignKey(PublishChannel)
-    allow_authenticated = models.BooleanField(default=False)
+
+    AUTH_CHOICES = (
+        (0, 'Public access'),
+        (1, 'SSO access'),
+        (2, 'SSO restricted role access')
+    )
+    auth_level = models.PositiveSmallIntegerField(choices=AUTH_CHOICES, default=1)
 
     default_schema = BorgConfiguration.PUBLISH_SCHEMA
     default_view_schema = BorgConfiguration.PUBLISH_VIEW_SCHEMA
