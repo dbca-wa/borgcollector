@@ -695,7 +695,7 @@ class SubmitToVersionControl(HarvestState):
         json_out["applications"] = ["{0}:{1}".format(o.application,o.order) for o in Application_Layers.objects.filter(publish=p)]
         json_out["title"] = p.title
         json_out["abstract"] = p.abstract
-        json_out["allow_authenticated"] = p.workspace.allow_authenticated
+        json_out["auth_level"] = p.workspace.auth_level
 
         if p.geoserver_setting:
             json_out["geoserver_setting"] = json.loads(p.geoserver_setting)
