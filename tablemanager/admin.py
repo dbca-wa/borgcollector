@@ -199,7 +199,7 @@ class DataSourceAdmin(VersionAdmin):
 
 
 class WorkspaceAdmin(VersionAdmin):
-    list_display = ("name","publish_channel","_schema","_view_schema","_test_schema","_test_view_schema")
+    list_display = ("name","publish_channel","auth_level","_schema","_test_schema",)
     readonly_fields = ("_schema","_view_schema","_test_schema","_test_view_schema")
     #actions = [instantiate]
     search_fields = ["name"]
@@ -209,22 +209,22 @@ class WorkspaceAdmin(VersionAdmin):
     def _schema(self,o): 
         return o.schema
     
-    _schema.short_description = "Publish Schema"
+    _schema.short_description = "Schema"
 
     def _view_schema(self,o): 
         return o.view_schema;
     
-    _view_schema.short_description = "Publish View Schema"
+    _view_schema.short_description = "View Schema"
 
     def _test_schema(self,o): 
         return o.test_schema;
     
-    _test_schema.short_description = "Publish Verify Schema"
+    _test_schema.short_description = "Test Schema"
 
     def _test_view_schema(self,o): 
         return o.test_view_schema;
     
-    _test_view_schema.short_description = "Publish View Verify Schema"
+    _test_view_schema.short_description = "Test View Schema"
 
     def custom_delete_selected(self,request,queryset):
         if request.POST.get('post') != 'yes':
