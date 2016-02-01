@@ -712,18 +712,19 @@ class SubmitToVersionControl(HarvestState):
             elif st.geography_columns:
                 json_out["bbox"] = st.geography_columns[0][2]
 
+        file_name = p.output_filename_abs('publish')
         #create the dir if required
-        if not os.path.exists(os.path.dirname(p.output_filename_abs)):
-            os.makedirs(os.path.dirname(p.output_filename_abs))
+        if not os.path.exists(os.path.dirname(file_name)):
+            os.makedirs(os.path.dirname(file_name))
 
-        with open(p.output_filename_abs, "wb") as output:
+        with open(file_name, "wb") as output:
             json.dump(json_out, output, indent=4)
 
         # Try and add file to repository, if no changes then continue
         hg = hglib.open(BorgConfiguration.BORG_STATE_REPOSITORY)
         try:
-            hg.add(files=[p.output_filename_abs])
-            hg.commit(include=[p.output_filename_abs],addremove=True, user=BorgConfiguration.BORG_STATE_USER, message="{} - updated {}.{}".format(p.job_batch_id, p.workspace.name, p.name))
+            hg.add(files=[file_name])
+            hg.commit(include=[file_name],addremove=True, user=BorgConfiguration.BORG_STATE_USER, message="{} - updated {}.{}".format(p.job_batch_id, p.workspace.name, p.name))
         except hglib.error.CommandError as e:
             if e.out != "nothing changed\n":
                 return (HarvestStateOutcome.failed, self.get_exception_message())
