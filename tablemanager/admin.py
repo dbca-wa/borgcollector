@@ -814,7 +814,49 @@ class PublishAdmin(VersionAdmin,JobFields):
 
     create_harvest_job.short_description = "Create Harvest Job Manually"
     
-    actions = ['enable_publish','disable_publish','create_harvest_job','publish_meta_data']
+    def empty_gwc(self,request,queryset):
+        result = None
+        failed_objects = []
+        try_set_push_owner("publish_admin",enforce=True)
+        warning_message = None
+        try:
+            for l in queryset:
+                try:
+                    if l.status not in [EnabledStatus]:
+                        #Publish is disabled.
+                        failed_objects.append(("{0}:{1}".format(l.workspace.name,l.name),"Disabled, no need to empty gwc."))
+                        continue
+
+                    l.empty_gwc()
+                except:
+                    logger.error(traceback.format_exc())
+                    error = sys.exc_info()
+                    failed_objects.append(("{0}:{1}".format(l.workspace.name,l.name),traceback.format_exception_only(error[0],error[1])))
+                    #remove failed, continue to process the next publish
+                    continue
+            try:
+                try_push_to_repository('publish_admin',enforce=True)
+            except:
+                error = sys.exc_info()
+                warning_message = traceback.format_exception_only(error[0],error[1])
+                logger.error(traceback.format_exc())
+        finally:
+            try_clear_push_owner("publish_admin",enforce=True)
+
+        if failed_objects or warning_message:
+            if failed_objects:
+                if warning_message:
+                    messages.warning(request, mark_safe("<ul><li>{0}</li><li>Some selected publishs are processed failed:<ul>{1}</ul></li></ul>".format(warning_message,"".join(["<li>{0} : {1}</li>".format(o[0],o[1]) for o in failed_objects]))))
+                else:
+                    messages.warning(request, mark_safe("Some selected publishs are processed failed:<ul>{0}</ul>".format("".join(["<li>{0} : {1}</li>".format(o[0],o[1]) for o in failed_objects]))))
+            else:
+                messages.warning(request, mark_safe(warning_message))
+        else:
+            messages.success(request, "All selected publishs are processed successfully.")
+
+    empty_gwc.short_description = "Empty GWC"
+
+    actions = ['enable_publish','disable_publish','create_harvest_job','publish_meta_data','empty_gwc']
     def get_actions(self, request):
         #import ipdb;ipdb.set_trace()
         actions = super(PublishAdmin, self).get_actions(request)

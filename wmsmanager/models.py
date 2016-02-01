@@ -240,20 +240,21 @@ class WmsServer(models.Model,ResourceStatusManagement,SignalEnable):
         finally:
             self.try_clear_signal_sender("delete")
 
-    @property
-    def json_filename(self):
-        return os.path.join(self.workspace.publish_channel.name,"wms_stores", "{}.{}.json".format(self.workspace.name, self.name))
+    def json_filename(self,action='publish'):
+        if action == 'publish':
+            return os.path.join(self.workspace.publish_channel.name,"wms_stores", "{}.{}.json".format(self.workspace.name, self.name))
+        else:
+            return os.path.join(self.workspace.publish_channel.name,"wms_stores", "{}.{}.{}.json".format(self.workspace.name, self.name,action))
 
-    @property
-    def json_filename_abs(self):
-        return os.path.join(BorgConfiguration.BORG_STATE_REPOSITORY, self.json_filename)
+    def json_filename_abs(self,action='publish'):
+        return os.path.join(BorgConfiguration.BORG_STATE_REPOSITORY, self.json_filename(action))
 
     def unpublish(self):
         """
          remove store's json reference (if exists) from the repository,
          return True if store is removed for repository; return false, if layers does not existed in repository.
         """
-        json_filename = self.json_filename_abs;
+        json_filename = self.json_filename_abs('publish');
         if os.path.exists(json_filename):
             #file exists, layers is published, remove it.
             try_set_push_owner("wmsserver")
@@ -276,7 +277,7 @@ class WmsServer(models.Model,ResourceStatusManagement,SignalEnable):
         """
          publish store's json reference (if exists) to the repository,
         """
-        json_filename = self.json_filename_abs;
+        json_filename = self.json_filename_abs('publish');
 
         try_set_push_owner("wmsserver")
         hg = None
@@ -394,20 +395,21 @@ class WmsLayer(models.Model,ResourceStatusManagement,SignalEnable):
         finally:
             self.try_clear_signal_sender("delete")
 
-    @property
-    def json_filename(self):
-        return os.path.join(self.server.workspace.publish_channel.name,"wms_layers", "{}.{}.json".format(self.server.workspace.name, self.name))
+    def json_filename(self,action='publish'):
+        if action == 'publish':
+            return os.path.join(self.server.workspace.publish_channel.name,"wms_layers", "{}.{}.json".format(self.server.workspace.name, self.name))
+        else:
+            return os.path.join(self.server.workspace.publish_channel.name,"wms_layers", "{}.{}.{}.json".format(self.server.workspace.name, self.name,action))
 
-    @property
-    def json_filename_abs(self):
-        return os.path.join(BorgConfiguration.BORG_STATE_REPOSITORY, self.json_filename)
+    def json_filename_abs(self,action='publish'):
+        return os.path.join(BorgConfiguration.BORG_STATE_REPOSITORY, self.json_filename(action))
 
     def unpublish(self):
         """
          remove store's json reference (if exists) from the repository,
          return True if store is removed for repository; return false, if layers does not existed in repository.
         """
-        json_filename = self.json_filename_abs;
+        json_filename = self.json_filename_abs('publish');
         if os.path.exists(json_filename):
             #file exists, layers is published, remove it.
             try_set_push_owner("wmslayer")
@@ -430,7 +432,7 @@ class WmsLayer(models.Model,ResourceStatusManagement,SignalEnable):
         """
          publish layer's json reference (if exists) to the repository,
         """
-        json_filename = self.json_filename_abs;
+        json_filename = self.json_filename_abs('publish');
         try_set_push_owner("wmslayer")
         hg = None
         try:
@@ -472,7 +474,7 @@ class WmsLayer(models.Model,ResourceStatusManagement,SignalEnable):
         if self.status not in [ResourceStatus.PUBLISHED,ResourceStatus.UPDATED]:
             #layer is not published, no need to empty gwc
             return
-        json_filename = self.json_filename_abs;
+        json_filename = self.json_filename_abs('empty_gwc');
         try_set_push_owner("wmslayer")
         hg = None
         try:
@@ -483,9 +485,6 @@ class WmsLayer(models.Model,ResourceStatusManagement,SignalEnable):
             json_out["action"] = "empty_gwc"
             json_out["empty_time"] = timezone.now().strftime("%Y-%m-%d %H:%M:%S.%f")
 
-            if self.geoserver_setting:
-                json_out["geoserver_setting"] = json.loads(self.geoserver_setting)
-        
             #create the dir if required
             if not os.path.exists(os.path.dirname(json_filename)):
                 os.makedirs(os.path.dirname(json_filename))
