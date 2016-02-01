@@ -2104,14 +2104,18 @@ class Publish(Transform,SignalEnable):
          so that slave nodes will remove the layer/table from their index
          return True if layres is removed for repository; return false, if layers does not existed in repository.
         """
-        if os.path.exists(self.output_filename_abs) or os.path.exists(self.metadata_filename_abs):
+        #get all possible files
+        files =[self.output_filename_abs(action) for action in ['publish','meta','empty_gwc'] ]
+        #get all existing files.
+        files =[ f for f in files if os.path.exists(f)]
+        if files:
             #file exists, layers is published, remove it.
             try_set_push_owner("remove_publish")
             hg = None
             try:
                 hg = hglib.open(BorgConfiguration.BORG_STATE_REPOSITORY)
-                hg.remove(files=[self.output_filename_abs,self.metadata_filename_abs])
-                hg.commit(include=[self.output_filename_abs],addremove=True, user="borgcollector", message="Removed {}.{}".format(self.workspace.name, self.name))
+                hg.remove(files=files)
+                hg.commit(include=files,addremove=True, user="borgcollector", message="Removed {}.{}".format(self.workspace.name, self.name))
                 increase_committed_changes()
 
                 try_push_to_repository("remove_publish",hg)
@@ -2177,6 +2181,7 @@ class Publish(Transform,SignalEnable):
         hg = None
         try:
             hg = hglib.open(BorgConfiguration.BORG_STATE_REPOSITORY)
+            json_file = self.output_filename_abs('meta')
 
             # Write JSON output file
             json_out = {}
@@ -2189,6 +2194,7 @@ class Publish(Transform,SignalEnable):
             json_out["sync_geoserver_data"] = True
             json_out["applications"] = ["{0}:{1}".format(o.application,o.order) for o in Application_Layers.objects.filter(publish=self)]
             json_out["title"] = self.title
+            json_out["action"] = 'meta'
             json_out["abstract"] = self.abstract
             json_out["publish_time"] = timezone.now().strftime("%Y-%m-%d %H:%M:%S.%f")
 
@@ -2198,13 +2204,13 @@ class Publish(Transform,SignalEnable):
                 json_out["style_path"] = "{}{}".format(BorgConfiguration.MASTER_PATH_PREFIX,style_file)
 
             #create the dir if required
-            if not os.path.exists(os.path.dirname(self.metadata_filename_abs)):
-                os.makedirs(os.path.dirname(self.metadata_filename_abs))
+            if not os.path.exists(os.path.dirname(json_file)):
+                os.makedirs(os.path.dirname(json_file))
 
-            with open(self.metadata_filename_abs, "wb") as output:
+            with open(json_file, "wb") as output:
                 json.dump(json_out, output, indent=4)
 
-            hg.commit(include=[self.metadata_filename_abs],addremove=True, user=BorgConfiguration.BORG_STATE_USER, message="Update feature's meta data {}.{}".format(self.workspace.name, self.name))
+            hg.commit(include=[json_file],addremove=True, user=BorgConfiguration.BORG_STATE_USER, message="Update feature's meta data {}.{}".format(self.workspace.name, self.name))
 
             increase_committed_changes()
 
@@ -2218,6 +2224,39 @@ class Publish(Transform,SignalEnable):
             if hg: hg.close()
             try_clear_push_owner("publish")
 
+    def empty_gwc(self):
+        """
+        Empty gwc to the repository
+        """
+        if self.status not in [EnabledStatus]:
+            #layer is not published, no need to empty gwc
+            return
+        json_file = self.output_filename_abs('empty_gwc');
+        try_set_push_owner("publish")
+        hg = None
+        try:
+            json_out = {}
+            json_out["name"] = self.table_name
+            json_out["workspace"] = self.workspace.name
+            json_out["action"] = "empty_gwc"
+            json_out["empty_time"] = timezone.now().strftime("%Y-%m-%d %H:%M:%S.%f")
+
+            #create the dir if required
+            if not os.path.exists(os.path.dirname(json_file)):
+                os.makedirs(os.path.dirname(json_file))
+
+            with open(json_file, "wb") as output:
+                json.dump(json_out, output, indent=4)
+        
+            hg = hglib.open(BorgConfiguration.BORG_STATE_REPOSITORY)
+            hg.commit(include=[json_file],addremove=True, user="borgcollector", message="Empty GWC of publish {}.{}".format(self.server.workspace.name, self.name))
+            increase_committed_changes()
+                
+            try_push_to_repository("publish",hg)
+        finally:
+            if hg: hg.close()
+            try_clear_push_owner("publish")
+
     @property
     def title(self):
         return self.kmi_title if self.kmi_title else (self.input_table.title if self.input_table else "")
@@ -2226,21 +2265,14 @@ class Publish(Transform,SignalEnable):
     def abstract(self):
         return self.kmi_abstract if self.kmi_abstract else (self.input_table.kmi_abstract if self.input_table else "")
 
-    @property
-    def output_filename(self):
-        return os.path.join(self.workspace.publish_channel.name,"layers", "{}.{}.json".format(self.workspace.name, self.name))
+    def output_filename(self,action='publish'):
+        if action == 'publish':
+            return os.path.join(self.workspace.publish_channel.name,"layers", "{}.{}.json".format(self.workspace.name, self.name))
+        else:
+            return os.path.join(self.workspace.publish_channel.name,"layers", "{}.{}.{}.json".format(self.workspace.name, self.name,action))
 
-    @property
-    def output_filename_abs(self):
-        return os.path.join(BorgConfiguration.BORG_STATE_REPOSITORY, self.output_filename)
-
-    @property
-    def metadata_filename(self):
-        return os.path.join(self.workspace.publish_channel.name,"layers", "{}.{}.meta.json".format(self.workspace.name, self.name))
-
-    @property
-    def metadata_filename_abs(self):
-        return os.path.join(BorgConfiguration.BORG_STATE_REPOSITORY, self.metadata_filename)
+    def output_filename_abs(self,action='publish'):
+        return os.path.join(BorgConfiguration.BORG_STATE_REPOSITORY, self.output_filename(action))
 
     def is_up_to_date(self,job=None,enforce=False):
         """
