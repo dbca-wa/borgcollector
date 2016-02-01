@@ -1837,6 +1837,10 @@ class Publish(Transform,SignalEnable):
     _style_re = re.compile("<se:Name>(?P<layer>.*?)</se:Name>")
     _property_re = re.compile("<ogc:PropertyName>(?P<property>.*?)</ogc:PropertyName>")
 
+    @property
+    def publish_status(self):
+        return PublishStatus.get_status(self.status)
+
     def init_relations(self):
         """
         initialize relations
@@ -2228,7 +2232,7 @@ class Publish(Transform,SignalEnable):
         """
         Empty gwc to the repository
         """
-        if self.status not in [EnabledStatus]:
+        if self.publish_status not in [EnabledStatus.instance()]:
             #layer is not published, no need to empty gwc
             return
         json_file = self.output_filename_abs('empty_gwc');
@@ -2249,7 +2253,7 @@ class Publish(Transform,SignalEnable):
                 json.dump(json_out, output, indent=4)
         
             hg = hglib.open(BorgConfiguration.BORG_STATE_REPOSITORY)
-            hg.commit(include=[json_file],addremove=True, user="borgcollector", message="Empty GWC of publish {}.{}".format(self.server.workspace.name, self.name))
+            hg.commit(include=[json_file],addremove=True, user="borgcollector", message="Empty GWC of publish {}.{}".format(self.workspace.name, self.name))
             increase_committed_changes()
                 
             try_push_to_repository("publish",hg)
