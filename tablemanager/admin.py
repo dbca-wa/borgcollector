@@ -822,7 +822,7 @@ class PublishAdmin(VersionAdmin,JobFields):
         try:
             for l in queryset:
                 try:
-                    if l.status not in [EnabledStatus]:
+                    if l.publish_status not in [EnabledStatus.instance()]:
                         #Publish is disabled.
                         failed_objects.append(("{0}:{1}".format(l.workspace.name,l.name),"Disabled, no need to empty gwc."))
                         continue
