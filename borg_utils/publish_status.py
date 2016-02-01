@@ -43,8 +43,6 @@ class PublishStatus(Singleton):
         """
         return all possible publish status
         """
-        PublishStatus._initialize()
-
         return PublishStatus._all_status
 
     @staticmethod
@@ -56,8 +54,6 @@ class PublishStatus(Singleton):
         if isinstance(status, PublishStatus):
             #status is a PublishStatus instance, return directly
             return status
-
-        PublishStatus._initialize()
 
         try:
             return PublishStatus._status_dict[status.lower()]
@@ -90,3 +86,4 @@ class DisabledStatus(PublishStatus):
 
 
 
+PublishStatus._initialize()
