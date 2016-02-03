@@ -254,15 +254,17 @@ class WmsServer(models.Model,ResourceStatusManagement,SignalEnable):
          remove store's json reference (if exists) from the repository,
          return True if store is removed for repository; return false, if layers does not existed in repository.
         """
-        json_filename = self.json_filename_abs('publish');
-        if os.path.exists(json_filename):
+        json_files = [ self.json_filename_abs(action) for action in [ 'publish' ] ]
+        #get all existing files.
+        json_files = [ f for f in json_files if os.path.exists(f) ]
+        if json_files:
             #file exists, layers is published, remove it.
             try_set_push_owner("wmsserver")
             hg = None
             try:
                 hg = hglib.open(BorgConfiguration.BORG_STATE_REPOSITORY)
-                hg.remove(files=[json_filename])
-                hg.commit(include=[json_filename],addremove=True, user="borgcollector", message="Remove wms store {}.{}".format(self.workspace.name, self.name))
+                hg.remove(files=json_files)
+                hg.commit(include=json_files,addremove=True, user="borgcollector", message="Remove wms store {}.{}".format(self.workspace.name, self.name))
                 increase_committed_changes()
                 
                 try_push_to_repository("wmsserver",hg)
@@ -288,7 +290,7 @@ class WmsServer(models.Model,ResourceStatusManagement,SignalEnable):
             json_out["username"] = self.user or ""
             json_out["password"] = self.password or ""
             json_out["workspace"] = self.workspace.name
-            json_out["publish_time"] = timezone.now().strftime("%Y-%m-%d %H:%M:%S.%f")
+            json_out["publish_time"] = timezone.localtime(timezone.now()).strftime("%Y-%m-%d %H:%M:%S.%f")
         
             if self.geoserver_setting:
                 json_out["geoserver_setting"] = json.loads(self.geoserver_setting)
@@ -409,15 +411,17 @@ class WmsLayer(models.Model,ResourceStatusManagement,SignalEnable):
          remove store's json reference (if exists) from the repository,
          return True if store is removed for repository; return false, if layers does not existed in repository.
         """
-        json_filename = self.json_filename_abs('publish');
-        if os.path.exists(json_filename):
+        json_files = [ self.json_filename_abs(action) for action in [ 'publish','empty_gwc' ] ]
+        #get all existing files.
+        json_files = [ f for f in json_files if os.path.exists(f) ]
+        if json_files:
             #file exists, layers is published, remove it.
             try_set_push_owner("wmslayer")
             hg = None
             try:
                 hg = hglib.open(BorgConfiguration.BORG_STATE_REPOSITORY)
-                hg.remove(files=[json_filename])
-                hg.commit(include=[json_filename],addremove=True, user="borgcollector", message="Remove wms layer {}.{}".format(self.server.workspace.name, self.name))
+                hg.remove(files=json_files)
+                hg.commit(include=json_files,addremove=True, user="borgcollector", message="Remove wms layer {}.{}".format(self.server.workspace.name, self.name))
                 increase_committed_changes()
                 
                 try_push_to_repository("wmslayer",hg)
@@ -443,7 +447,7 @@ class WmsLayer(models.Model,ResourceStatusManagement,SignalEnable):
             json_out["abstract"] = self.layer_abstract
             json_out["workspace"] = self.server.workspace.name
             json_out["store"] = self.server.name
-            json_out["publish_time"] = timezone.now().strftime("%Y-%m-%d %H:%M:%S.%f")
+            json_out["publish_time"] = timezone.localtime(timezone.now()).strftime("%Y-%m-%d %H:%M:%S.%f")
 
             from application.models import Application_Layers
             json_out["applications"] = ["{0}:{1}".format(o.application,o.order) for o in Application_Layers.objects.filter(wmslayer=self)]
@@ -459,7 +463,16 @@ class WmsLayer(models.Model,ResourceStatusManagement,SignalEnable):
                 json.dump(json_out, output, indent=4)
         
             hg = hglib.open(BorgConfiguration.BORG_STATE_REPOSITORY)
-            hg.commit(include=[json_filename],addremove=True, user="borgcollector", message="update wms layer {}.{}".format(self.server.workspace.name, self.name))
+
+            #remove other related json files
+            json_files = [ self.json_filename_abs(action) for action in [ 'empty_gwc' ] ]
+            #get all existing files.
+            json_files = [ f for f in json_files if os.path.exists(f) ]
+            if json_files:
+                hg.remove(files=json_files)
+
+            json_files.append(json_filename)
+            hg.commit(include=json_files,addremove=True, user="borgcollector", message="update wms layer {}.{}".format(self.server.workspace.name, self.name))
             increase_committed_changes()
                 
             try_push_to_repository("wmslayer",hg)
@@ -473,7 +486,8 @@ class WmsLayer(models.Model,ResourceStatusManagement,SignalEnable):
         """
         if self.status not in [ResourceStatus.PUBLISHED,ResourceStatus.UPDATED]:
             #layer is not published, no need to empty gwc
-            return
+            raise ValidationError("The wms layer({0}) is not published before.".format(self.name))
+
         json_filename = self.json_filename_abs('empty_gwc');
         try_set_push_owner("wmslayer")
         hg = None
@@ -483,7 +497,7 @@ class WmsLayer(models.Model,ResourceStatusManagement,SignalEnable):
             json_out["workspace"] = self.server.workspace.name
             json_out["store"] = self.server.name
             json_out["action"] = "empty_gwc"
-            json_out["empty_time"] = timezone.now().strftime("%Y-%m-%d %H:%M:%S.%f")
+            json_out["publish_time"] = timezone.localtime(timezone.now()).strftime("%Y-%m-%d %H:%M:%S.%f")
 
             #create the dir if required
             if not os.path.exists(os.path.dirname(json_filename)):

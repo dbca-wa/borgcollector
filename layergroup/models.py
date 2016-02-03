@@ -202,15 +202,17 @@ class LayerGroup(models.Model,ResourceStatusManagement,SignalEnable):
          remove store's json reference (if exists) from the repository,
          return True if store is removed for repository; return false, if layers does not existed in repository.
         """
-        json_filename = self.json_filename_abs('publish');
-        if os.path.exists(json_filename):
+        json_files = [ self.json_filename_abs(action) for action in [ 'publish','empty_gwc' ] ]
+        #get all existing files.
+        json_files = [ f for f in json_files if os.path.exists(f) ]
+        if json_files:
             #file exists, layers is published, remove it.
             try_set_push_owner("layergroup")
             hg = None
             try:
                 hg = hglib.open(BorgConfiguration.BORG_STATE_REPOSITORY)
-                hg.remove(files=[json_filename])
-                hg.commit(include=[json_filename],addremove=True, user="borgcollector", message="Remove layer group {}.{}".format(self.workspace.name, self.name))
+                hg.remove(files=json_files)
+                hg.commit(include=json_files,addremove=True, user="borgcollector", message="Remove layer group {}.{}".format(self.workspace.name, self.name))
                 increase_committed_changes()
                 
                 try_push_to_repository("layergroup",hg)
@@ -248,7 +250,7 @@ class LayerGroup(models.Model,ResourceStatusManagement,SignalEnable):
             json_out["abstract"] = self.abstract or ""
             json_out["workspace"] = self.workspace.name
             json_out["srs"] = self.srs
-            json_out["publish_time"] = timezone.now().strftime("%Y-%m-%d %H:%M:%S.%f")
+            json_out["publish_time"] = timezone.localtime(timezone.now()).strftime("%Y-%m-%d %H:%M:%S.%f")
             inclusions = self.get_inclusions()
             dependent_groups = []
             for group in inclusions[2].keys():
@@ -267,7 +269,16 @@ class LayerGroup(models.Model,ResourceStatusManagement,SignalEnable):
                 json.dump(json_out, output, indent=4)
         
             hg = hglib.open(BorgConfiguration.BORG_STATE_REPOSITORY)
-            hg.commit(include=[json_filename], user="borgcollector",addremove=True, message="Update layer group {}.{}".format(self.workspace.name, self.name))
+
+            #remove other related json files
+            json_files = [ self.json_filename_abs(action) for action in [ 'empty_gwc' ] ]
+            #get all existing files.
+            json_files = [ f for f in json_files if os.path.exists(f) ]
+            if json_files:
+                hg.remove(files=json_files)
+
+            json_files.append(json_filename)
+            hg.commit(include=json_files, user="borgcollector",addremove=True, message="Update layer group {}.{}".format(self.workspace.name, self.name))
             increase_committed_changes()
                 
             try_push_to_repository("layergroup",hg)
@@ -281,7 +292,8 @@ class LayerGroup(models.Model,ResourceStatusManagement,SignalEnable):
         """
         if self.status not in [ResourceStatus.PUBLISHED,ResourceStatus.UPDATED]:
             #layer is not published, no need to empty gwc
-            return
+            raise ValidationError("The layergroup({0}) is not published before.".format(self.name))
+
         json_filename = self.json_filename_abs('empty_gwc');
         try_set_push_owner("layergroup")
         hg = None
@@ -290,7 +302,7 @@ class LayerGroup(models.Model,ResourceStatusManagement,SignalEnable):
             json_out["name"] = self.name
             json_out["workspace"] = self.workspace.name
             json_out["action"] = "empty_gwc"
-            json_out["empty_time"] = timezone.now().strftime("%Y-%m-%d %H:%M:%S.%f")
+            json_out["publish_time"] = timezone.localtime(timezone.now()).strftime("%Y-%m-%d %H:%M:%S.%f")
 
             if self.geoserver_setting:
                 json_out["geoserver_setting"] = json.loads(self.geoserver_setting)
