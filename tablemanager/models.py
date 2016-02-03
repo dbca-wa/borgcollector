@@ -2201,6 +2201,7 @@ class Publish(Transform,SignalEnable):
             json_out["action"] = 'meta'
             json_out["abstract"] = self.abstract
             json_out["publish_time"] = timezone.now().strftime("%Y-%m-%d %H:%M:%S.%f")
+            json_out["auth_level"] = self.workspace.auth_level
 
             if self.geoserver_setting:
                 json_out["geoserver_setting"] = json.loads(self.geoserver_setting)
@@ -2244,6 +2245,7 @@ class Publish(Transform,SignalEnable):
             json_out["workspace"] = self.workspace.name
             json_out["action"] = "empty_gwc"
             json_out["empty_time"] = timezone.now().strftime("%Y-%m-%d %H:%M:%S.%f")
+            json_out["auth_level"] = self.workspace.auth_level
 
             #create the dir if required
             if not os.path.exists(os.path.dirname(json_file)):
