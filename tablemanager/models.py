@@ -2235,7 +2235,14 @@ class Publish(Transform,SignalEnable):
         """
         if self.publish_status not in [EnabledStatus.instance()]:
             #layer is not published, no need to empty gwc
-            return
+            raise ValidationError("The publish({0}) is disabled".format(self.name))
+
+        geo_settings = json.loads(self.geoserver_setting) if self.geoserver_setting else {}
+        if not geo_settings.get("create_cache_layer",False):
+            #layer does not enable gwc, no need to empty gwc
+            raise ValidationError("The publish({0}) doesn't enable gwc.".format(self.name))
+
+
         json_file = self.output_filename_abs('empty_gwc');
         try_set_push_owner("publish")
         hg = None
