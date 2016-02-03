@@ -2184,7 +2184,6 @@ class Publish(Transform,SignalEnable):
         try_set_push_owner("publish")
         hg = None
         try:
-            hg = hglib.open(BorgConfiguration.BORG_STATE_REPOSITORY)
             json_file = self.output_filename_abs('meta')
 
             # Write JSON output file
@@ -2200,7 +2199,7 @@ class Publish(Transform,SignalEnable):
             json_out["title"] = self.title
             json_out["action"] = 'meta'
             json_out["abstract"] = self.abstract
-            json_out["publish_time"] = timezone.now().strftime("%Y-%m-%d %H:%M:%S.%f")
+            json_out["publish_time"] = timezone.localtime(timezone.now()).strftime("%Y-%m-%d %H:%M:%S.%f")
             json_out["auth_level"] = self.workspace.auth_level
 
             if self.geoserver_setting:
@@ -2215,6 +2214,7 @@ class Publish(Transform,SignalEnable):
             with open(json_file, "wb") as output:
                 json.dump(json_out, output, indent=4)
 
+            hg = hglib.open(BorgConfiguration.BORG_STATE_REPOSITORY)
             hg.commit(include=[json_file],addremove=True, user=BorgConfiguration.BORG_STATE_USER, message="Update feature's meta data {}.{}".format(self.workspace.name, self.name))
 
             increase_committed_changes()
@@ -2251,7 +2251,7 @@ class Publish(Transform,SignalEnable):
             json_out["name"] = self.table_name
             json_out["workspace"] = self.workspace.name
             json_out["action"] = "empty_gwc"
-            json_out["empty_time"] = timezone.now().strftime("%Y-%m-%d %H:%M:%S.%f")
+            json_out["publish_time"] = timezone.localtime(timezone.now()).strftime("%Y-%m-%d %H:%M:%S.%f")
             json_out["auth_level"] = self.workspace.auth_level
 
             #create the dir if required

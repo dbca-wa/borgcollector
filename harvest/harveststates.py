@@ -625,6 +625,7 @@ class SubmitToVersionControl(HarvestState):
         json_out["title"] = p.title
         json_out["abstract"] = p.abstract
         json_out["auth_level"] = p.workspace.auth_level
+        json_out["publish_time"] = timezone.localtime(timezone.now()).strftime("%Y-%m-%d %H:%M:%S.%f")
 
         if p.geoserver_setting:
             json_out["geoserver_setting"] = json.loads(p.geoserver_setting)
@@ -653,7 +654,16 @@ class SubmitToVersionControl(HarvestState):
         hg = hglib.open(BorgConfiguration.BORG_STATE_REPOSITORY)
         try:
             hg.add(files=[file_name])
-            hg.commit(include=[file_name],addremove=True, user=BorgConfiguration.BORG_STATE_USER, message="{} - updated {}.{}".format(p.job_batch_id, p.workspace.name, p.name))
+
+            #remove meta json file and empty gwc json file
+            files =[p.output_filename_abs(action) for action in ['meta','empty_gwc'] ]
+            files =[ f for f in files if os.path.exists(f)]
+            if files:
+                hg.remove(files=files)
+
+            files.append(file_name)
+
+            hg.commit(include=files,addremove=True, user=BorgConfiguration.BORG_STATE_USER, message="{} - updated {}.{}".format(p.job_batch_id, p.workspace.name, p.name))
         except hglib.error.CommandError as e:
             if e.out != "nothing changed\n":
                 return (HarvestStateOutcome.failed, self.get_exception_message())
