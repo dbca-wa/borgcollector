@@ -6,12 +6,12 @@ class ResourceStatus(object):
     PUBLISHED = 'Published' #published
     UNPUBLISHED = 'Unpublished' #not published now; 
 
-    PUBLISH = 'Publish' #a intermediate status
-    UNPUBLISH = 'Unpublish' #a intermediate status
-    CASCADE_UNPUBLISH = 'CascadeUnpublish' #a intermediate status
-    DEPENDENT_PUBLISH = 'DependentPublish' #a intermediate status, used to automatically publish the resource dependent by the current resource.
-    CASCADE_PUBLISH = 'CascadePublish' #a intermediate status, used to automatically publish the children resource ownd by the current resource
-    SIDE_PUBLISH = 'SidePublish' #a intermediate status, used to automatically publish the resource affected by the current resource
+    PUBLISH = 'Publish' #an intermediate status
+    UNPUBLISH = 'Unpublish' #an intermediate status
+    CASCADE_UNPUBLISH = 'CascadeUnpublish' #an intermediate status, used to automatically unpulish the descendant resources 
+    DEPENDENT_PUBLISH = 'DependentPublish' #an intermediate status, used to automatically publish the parent resources.
+    CASCADE_PUBLISH = 'CascadePublish' #an intermediate status, used to automatically publish the descendant resources
+    SIDE_PUBLISH = 'SidePublish' #an intermediate status, used to automatically publish the resource affected by the current resource
 
 class ResourceStatusManagement(object):
     """
