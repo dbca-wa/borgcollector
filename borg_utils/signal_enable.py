@@ -8,7 +8,7 @@ class SignalEnable(object):
 
     def try_set_signal_sender(self,action):
         """
-        Set the original signal sender, used in cascade deletion
+        Set the original signal sender, used in cascade operation to include all operation in one transaction
         If sender is already set, then return directly, otherwise, send the current instance as the sender
         return True, if set successfully; otherwise, return False
         """
