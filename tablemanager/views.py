@@ -66,7 +66,7 @@ class VRTFileView(View):
             output = subprocess.check_output(["ogrinfo", "-ro", "-al" , "-so", vrt_file.name], stderr=subprocess.STDOUT)
             if output.find("ERROR") > -1:
                 logger.error(output)   
-                raise Exception(l)
+                raise Exception(output)
             else:
                 if output[0:1] != "\n" and output[0:2] != "\r\n":
                     output = "\n" + output
