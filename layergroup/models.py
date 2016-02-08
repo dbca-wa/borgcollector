@@ -87,24 +87,24 @@ class LayerGroup(models.Model,ResourceStatusManagement,SignalEnable):
 
     def save(self, force_insert=False, force_update=False, using=None, update_fields=None):
         try:
-            if self.try_set_signal_sender("save"):
+            if self.try_set_signal_sender("layergroup_save"):
                 with transaction.atomic():
                     super(LayerGroup,self).save(force_insert,force_update,using,update_fields)
             else:
                 super(LayerGroup,self).save(force_insert,force_update,using,update_fields)
         finally:
-            self.try_clear_signal_sender("save")
+            self.try_clear_signal_sender("layergroup_save")
 
     def delete(self,using=None):
         logger.info('Delete {0}:{1}'.format(type(self),self.name))
         try:
-            if self.try_set_signal_sender("delete"):
+            if self.try_set_signal_sender("layergroup_delete"):
                 with transaction.atomic():
                     super(LayerGroup,self).delete(using)
             else:
                 super(LayerGroup,self).delete(using)
         finally:
-            self.try_clear_signal_sender("delete")
+            self.try_clear_signal_sender("layergroup_delete")
 
     def check_circular_dependency(self,editing_group_layer=None,parents=None):
         """
@@ -379,24 +379,24 @@ class LayerGroupLayers(models.Model,SignalEnable):
 
     def save(self, force_insert=False, force_update=False, using=None, update_fields=None):
         try:
-            if self.try_set_signal_sender("save"):
+            if self.try_set_signal_sender("layer_save"):
                 with transaction.atomic():
                     super(LayerGroupLayers,self).save(force_insert,force_update,using,update_fields)
             else:
                 super(LayerGroupLayers,self).save(force_insert,force_update,using,update_fields)
         finally:
-            self.try_clear_signal_sender("save")
+            self.try_clear_signal_sender("layer_save")
 
     def delete(self,using=None):
         logger.info('Delete {0}:{1}'.format(type(self),self.name))
         try:
-            if self.try_set_signal_sender("delete"):
+            if self.try_set_signal_sender("layer_delete"):
                 with transaction.atomic():
                     super(LayerGroupLayers,self).delete(using)
             else:
                 super(LayerGroupLayers,self).delete(using)
         finally:
-            self.try_clear_signal_sender("delete")
+            self.try_clear_signal_sender("layer_delete")
 
     def __str__(self):
         return "group={0} , layer={1}".format(self.group,self.layer)
@@ -493,7 +493,7 @@ class LayerGroupLayersEventListener(object):
     @staticmethod
     @receiver(post_delete, sender=LayerGroupLayers)
     def _post_delete(sender, instance, **args):
-        if instance.is_signal_sender("delete"):
+        if instance.is_signal_sender("layer_delete"):
             #trigged by itself
             instance.group.status = instance.group.get_next_status(instance.group.status,ResourceStatus.UPDATED)
             instance.group.last_modify_time = timezone.now()
@@ -502,7 +502,7 @@ class LayerGroupLayersEventListener(object):
     @staticmethod
     @receiver(post_save, sender=LayerGroupLayers)
     def _post_save(sender, instance, **args):
-        if instance.is_signal_sender("save"):
+        if instance.is_signal_sender("layer_save"):
             instance.group.status = instance.group.get_next_status(instance.group.status,ResourceStatus.UPDATED)
             instance.group.last_modify_time = timezone.now()
             instance.group.save(update_fields=["status","last_modify_time"])

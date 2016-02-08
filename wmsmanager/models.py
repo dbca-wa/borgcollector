@@ -221,24 +221,24 @@ class WmsServer(models.Model,ResourceStatusManagement,SignalEnable):
  
     def save(self, force_insert=False, force_update=False, using=None, update_fields=None):
         try:
-            if self.try_set_signal_sender("save"):
+            if self.try_set_signal_sender("wmsserver_save"):
                 with transaction.atomic():
                     super(WmsServer,self).save(force_insert,force_update,using,update_fields)
             else:
                 super(WmsServer,self).save(force_insert,force_update,using,update_fields)
         finally:
-            self.try_clear_signal_sender("save")
+            self.try_clear_signal_sender("wmsserver_save")
 
     def delete(self,using=None):
         logger.info('Delete {0}:{1}'.format(type(self),self.name))
         try:
-            if self.try_set_signal_sender("delete"):
+            if self.try_set_signal_sender("wmsserver_delete"):
                 with transaction.atomic():
                     super(WmsServer,self).delete(using)
             else:
                 super(WmsServer,self).delete(using)
         finally:
-            self.try_clear_signal_sender("delete")
+            self.try_clear_signal_sender("wmsserver_delete")
 
     def json_filename(self,action='publish'):
         if action == 'publish':
@@ -378,24 +378,24 @@ class WmsLayer(models.Model,ResourceStatusManagement,SignalEnable):
 
     def save(self, force_insert=False, force_update=False, using=None, update_fields=None):
         try:
-            if self.try_set_signal_sender("save"):
+            if self.try_set_signal_sender("wmslayer_save"):
                 with transaction.atomic():
                     super(WmsLayer,self).save(force_insert,force_update,using,update_fields)
             else:
                 super(WmsLayer,self).save(force_insert,force_update,using,update_fields)
         finally:
-            self.try_clear_signal_sender("save")
+            self.try_clear_signal_sender("wmslayer_save")
 
     def delete(self,using=None):
         logger.info('Delete {0}:{1}'.format(type(self),self.name))
         try:
-            if self.try_set_signal_sender("delete"):
+            if self.try_set_signal_sender("wmslayer_delete"):
                 with transaction.atomic():
                     super(WmsLayer,self).delete(using)
             else:
                 super(WmsLayer,self).delete(using)
         finally:
-            self.try_clear_signal_sender("delete")
+            self.try_clear_signal_sender("wmslayer_delete")
 
     def json_filename(self,action='publish'):
         if action == 'publish':
