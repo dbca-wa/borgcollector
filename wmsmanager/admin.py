@@ -11,7 +11,7 @@ from wmsmanager.models import WmsServer, WmsLayer, PublishedWmsLayer, Interested
 from wmsmanager.forms import WmsServerForm,WmsLayerForm
 from layergroup.models import LayerGroupLayers
 from borg.admin import site
-from borg_utils.resource_status import ResourceStatus
+from borg_utils.resource_status import ResourceStatus,ResourceAction
 from borg_utils.hg_batch_push import try_set_push_owner, try_clear_push_owner, increase_committed_changes, try_push_to_repository
 
 logger = logging.getLogger(__name__)
@@ -61,14 +61,14 @@ class WmsServerAdmin(admin.ModelAdmin):
     refresh_layers.short_description = "Refresh WMS Layers"
     
     def publish(self,request,queryset):
-        self._change_status(request,queryset,ResourceStatus.PUBLISH,["status","last_publish_time"])
+        self._change_status(request,queryset,ResourceAction.PUBLISH,["status","last_publish_time"])
     publish.short_description = "Publish selected servers"
 
     def unpublish(self,request,queryset):
-        self._change_status(request,queryset,ResourceStatus.UNPUBLISH,["status","last_unpublish_time"])
+        self._change_status(request,queryset,ResourceAction.UNPUBLISH,["status","last_unpublish_time"])
     unpublish.short_description = "Unpublish selected servers"
 
-    def _change_status(self,request,queryset,status,update_fields=None):
+    def _change_status(self,request,queryset,action,update_fields=None):
         result = None
         failed_objects = []
         try_set_push_owner("wmsserver_admin",enforce=True)
@@ -77,14 +77,13 @@ class WmsServerAdmin(admin.ModelAdmin):
             for server in queryset:
                 #import ipdb;ipdb.set_trace()
                 try:
-                    target_status = server.get_next_status(server.status,status)
-                    if target_status == server.status:
+                    target_status = server.next_status(action)
+                    if target_status == server.status and not server.publish_required and not server.unpublish_required:
                         #status not changed
                         continue
                     else:
                         server.status = target_status
-
-                    server.save(update_fields=update_fields)
+                        server.save(update_fields=update_fields)
                 except:
                     logger.error(traceback.format_exc())
                     error = sys.exc_info()
@@ -188,10 +187,6 @@ class AbstractWmsLayerAdmin(admin.ModelAdmin):
     def has_delete_permission(self,request,obj=None):
         return False
 
-    def publish(self,request,queryset):
-        self._change_status(request,queryset,ResourceStatus.PUBLISH,["status","last_publish_time"])
-    publish.short_description = "Publish selected layers"
-
     def empty_gwc(self,request,queryset):
         result = None
         failed_objects = []
@@ -200,7 +195,7 @@ class AbstractWmsLayerAdmin(admin.ModelAdmin):
         try:
             for l in queryset:
                 try:
-                    if l.status not in [ResourceStatus.PUBLISHED,ResourceStatus.UPDATED]:
+                    if l.publish_status.unpublished:
                         #Not published before.
                         failed_objects.append(("{0}:{1}".format(l.server,l.name),"Not published before, no need to empty gwc."))
                         continue
@@ -208,8 +203,8 @@ class AbstractWmsLayerAdmin(admin.ModelAdmin):
                     l.empty_gwc()
                     #empty the related layergroup's cache
                     for layer in LayerGroupLayers.objects.filter(layer = l):
-                        target_status = layer.group.get_next_status(layer.group.status,ResourceStatus.SIDE_PUBLISH)
-                        if target_status == ResourceStatus.PUBLISH:
+                        target_status = layer.group.next_status(ResourceAction.CASCADE_PUBLISH)
+                        if layer.group.publish_required:
                             layer.group.empty_gwc()
                     
                 except:
@@ -240,11 +235,15 @@ class AbstractWmsLayerAdmin(admin.ModelAdmin):
 
     empty_gwc.short_description = "Empty GWC"
 
+    def publish(self,request,queryset):
+        self._change_status(request,queryset,ResourceAction.PUBLISH,["status","last_publish_time"])
+    publish.short_description = "Publish selected layers"
+
     def unpublish(self,request,queryset):
-        self._change_status(request,queryset,ResourceStatus.UNPUBLISH,["status","last_unpublish_time"])
+        self._change_status(request,queryset,ResourceAction.UNPUBLISH,["status","last_unpublish_time"])
     unpublish.short_description = "Unpublish selected layers"
 
-    def _change_status(self,request,queryset,status,update_fields=None):
+    def _change_status(self,request,queryset,action,update_fields=None):
         result = None
         failed_objects = []
         try_set_push_owner("wmslayer_admin",enforce=True)
@@ -252,14 +251,13 @@ class AbstractWmsLayerAdmin(admin.ModelAdmin):
         try:
             for l in queryset:
                 try:
-                    target_status = l.get_next_status(l.status,status)
-                    if target_status == l.status:
-                        #status not changed
+                    target_status = l.next_status(action)
+                    if target_status == l.status and not l.publish_required and not l.unpublish_required:
+                        #status not changed 
                         continue
                     else:
                         l.status = target_status
-
-                    l.save(update_fields=update_fields)
+                        l.save(update_fields=update_fields)
                 except:
                     logger.error(traceback.format_exc())
                     error = sys.exc_info()
@@ -306,12 +304,12 @@ class WmsLayerAdmin(AbstractWmsLayerAdmin):
 class PublishedWmsLayerAdmin(AbstractWmsLayerAdmin):
     def get_queryset(self,request):
         qs = super(PublishedWmsLayerAdmin,self).get_queryset(request)
-        return qs.filter(status__in = [ResourceStatus.PUBLISHED,ResourceStatus.UPDATED])
+        return qs.filter(status__in = ResourceStatus.published_status)
 
 class InterestedWmsLayerAdmin(AbstractWmsLayerAdmin):
     def get_queryset(self,request):
         qs = super(InterestedWmsLayerAdmin,self).get_queryset(request)
-        return qs.exclude(status = ResourceStatus.NEW,last_modify_time = None)
+        return qs.exclude(status = ResourceStatus.New.name,last_modify_time = None)
 
 site.register(WmsServer, WmsServerAdmin)
 site.register(WmsLayer, WmsLayerAdmin)

@@ -29,7 +29,7 @@ from harvest.jobstatemachine import JobStatemachine
 from borg_utils.jobintervals import Manually
 from borg_utils.spatial_table import SpatialTable
 from borg_utils.borg_config import BorgConfiguration
-from borg_utils.publish_status import PublishStatus,DisabledStatus,EnabledStatus
+from borg_utils.resource_status import ResourceStatus
 from borg_utils.hg_batch_push import try_set_push_owner, try_clear_push_owner, increase_committed_changes, try_push_to_repository
 
 logger = logging.getLogger(__name__)
@@ -734,9 +734,9 @@ class PublishAdmin(VersionAdmin,JobFields):
         failed_objects = []
         for publish in queryset:
             #modify the table data
-            if publish.status != EnabledStatus.instance().name:
+            if publish.status != ResourceStatus.Enabled.name:
                 #status is changed
-                publish.status = EnabledStatus.instance().name
+                publish.status = ResourceStatus.Enabled.name
                 publish.pending_actions = PublishAction.publish_all_action
                 try:
                     publish.save(update_fields=['status','pending_actions'])
@@ -763,8 +763,8 @@ class PublishAdmin(VersionAdmin,JobFields):
             for publish in queryset:
                 try:
                     publish.remove_publish_from_repository()
-                    if publish.status != DisabledStatus.instance().name:
-                        publish.status = DisabledStatus.instance().name
+                    if publish.status != ResourceStatus.Disabled.name:
+                        publish.status = ResourceStatus.Disabled.name
                         publish.pending_actions = None
                         publish.job_id = None
                         publish.job_batch_id = None
@@ -822,7 +822,7 @@ class PublishAdmin(VersionAdmin,JobFields):
         try:
             for l in queryset:
                 try:
-                    if l.publish_status not in [EnabledStatus.instance()]:
+                    if l.publish_status not in [ResourceStatus.Enabled]:
                         #Publish is disabled.
                         failed_objects.append(("{0}:{1}".format(l.workspace.name,l.name),"Disabled, no need to empty gwc."))
                         continue

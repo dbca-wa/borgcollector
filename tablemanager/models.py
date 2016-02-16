@@ -41,7 +41,7 @@ from borg_utils.gdal import detect_epsg
 from borg_utils.spatial_table import SpatialTable
 from borg_utils.borg_config import BorgConfiguration
 from borg_utils.jobintervals import JobInterval,Weekly,Triggered
-from borg_utils.publish_status import PublishStatus,EnabledStatus
+from borg_utils.resource_status import ResourceStatus,ResourceStatusManagement
 from borg_utils.db_util import DbUtil
 from borg_utils.signal_enable import SignalEnable
 from borg_utils.hg_batch_push import try_set_push_owner, try_clear_push_owner, increase_committed_changes, try_push_to_repository
@@ -1789,10 +1789,9 @@ def get_full_data_file_name(instance,filename):
     else:
         return 'full_data/{0}/{1}/{2}'.format(instance.workspace.publish_channel.name,instance.job_batch_id,filename)
 
-class Publish(Transform,SignalEnable):
+class Publish(Transform,ResourceStatusManagement,SignalEnable):
     """
-    Represents an operation to publish parts of an Input table in the harvest
-    DB as a view.
+    A feature, whose data is derived from input and normal table, will be published to slave server and then can be accessed through kmi.
     """
     TRANSFORM = [
         "CREATE FUNCTION \"{{trans_schema}}\".\"{{self.func_name}}\"() RETURNS SETOF \"{{input_table_schema}}\".\"{{input_table_name}}\" as ",
@@ -1803,7 +1802,7 @@ class Publish(Transform,SignalEnable):
     name = models.SlugField(max_length=255, unique=True, help_text="Name of Publish", validators=[validate_slug])
     workspace = models.ForeignKey(Workspace)
     interval = models.CharField(max_length=64, choices=JobInterval.publish_options(), default=Weekly.instance().name)
-    status = models.CharField(max_length=32, choices=PublishStatus.all_options(),default=EnabledStatus.instance().name)
+    status = models.CharField(max_length=32, choices=ResourceStatus.publish_status_options,default=ResourceStatus.Enabled.name)
     kmi_title = models.CharField(max_length=512,null=True,editable=True,blank=True)
     kmi_abstract = models.TextField(null=True,editable=True,blank=True)
     input_table = models.ForeignKey(Input, blank=True,null=True) # Referencing the schema which to introspect for the output of this transform
@@ -1836,10 +1835,6 @@ class Publish(Transform,SignalEnable):
 
     _style_re = re.compile("<se:Name>(?P<layer>.*?)</se:Name>")
     _property_re = re.compile("<ogc:PropertyName>(?P<property>.*?)</ogc:PropertyName>")
-
-    @property
-    def publish_status(self):
-        return PublishStatus.get_status(self.status)
 
     def init_relations(self):
         """
@@ -1904,10 +1899,6 @@ class Publish(Transform,SignalEnable):
     @property
     def relations(self):
         return [self.relation_1,self.relation_2,self.relation_3]
-
-    @property
-    def publish_status(self):
-        return PublishStatus.get_status(self.status)
 
     @property
     def func_name(self):
@@ -2153,7 +2144,7 @@ class Publish(Transform,SignalEnable):
     def publish_meta_data(self):
         from application.models import Application_Layers
         publish_action = PublishAction(self.pending_actions)
-        if self.status != EnabledStatus.instance().name:
+        if self.publish_status != ResourceStatus.Enabled:
             raise ValidationError("The publish({0}) is disabled".format(self.name))
 
         if not self.workspace.publish_channel.sync_geoserver_data:
@@ -2233,7 +2224,7 @@ class Publish(Transform,SignalEnable):
         """
         Empty gwc to the repository
         """
-        if self.publish_status not in [EnabledStatus.instance()]:
+        if self.publish_status not in [ResourceStatus.Enabled]:
             #layer is not published, no need to empty gwc
             raise ValidationError("The publish({0}) is disabled".format(self.name))
 
@@ -2242,6 +2233,11 @@ class Publish(Transform,SignalEnable):
             #layer does not enable gwc, no need to empty gwc
             raise ValidationError("The publish({0}) doesn't enable gwc.".format(self.name))
 
+        #check whether this publish is published before or not
+        if not os.path.exists(self.output_filename_abs('publish')):
+            #not published before.
+            raise ValidationError("The publish({0}) is not published or already unpublished.".format(self.name))
+        
 
         json_file = self.output_filename_abs('empty_gwc');
         try_set_push_owner("publish")
@@ -2292,7 +2288,7 @@ class Publish(Transform,SignalEnable):
         Returns PublishAction object.
         """
         #import ipdb;ipdb.set_trace();
-        if self.status != EnabledStatus.instance().name:
+        if self.publish_status != ResourceStatus.Enabled:
             return None
 
         publish_action = PublishAction(self.pending_actions)
