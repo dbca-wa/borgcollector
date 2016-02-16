@@ -22,7 +22,7 @@ from django.core.validators import RegexValidator
 from tablemanager.models import Workspace
 from borg_utils.borg_config import BorgConfiguration
 from borg_utils.signals import refresh_select_choices,inherit_support_receiver
-from borg_utils.resource_status import ResourceStatus,ResourceStatusManagement
+from borg_utils.resource_status import ResourceStatus,ResourceStatusManagement,ResourceAction
 from borg_utils.signal_enable import SignalEnable
 from borg_utils.hg_batch_push import try_set_push_owner, try_clear_push_owner, increase_committed_changes, try_push_to_repository
 
@@ -30,20 +30,6 @@ logger = logging.getLogger(__name__)
 
 slug_re = re.compile(r'^[a-z0-9_]+$')
 validate_slug = RegexValidator(slug_re, "Slug can only contain lowercase letters, numbers and underscores", "invalid")
-
-SERVER_STATUS_CHOICES = (
-    (ResourceStatus.NEW,ResourceStatus.NEW),
-    (ResourceStatus.UPDATED,ResourceStatus.UPDATED),
-    (ResourceStatus.PUBLISHED,ResourceStatus.PUBLISHED),
-    (ResourceStatus.UNPUBLISHED,ResourceStatus.UNPUBLISHED),
-)
-
-LAYER_STATUS_CHOICES = (
-    (ResourceStatus.NEW,ResourceStatus.NEW),
-    (ResourceStatus.UPDATED,ResourceStatus.UPDATED),
-    (ResourceStatus.UNPUBLISHED,ResourceStatus.UNPUBLISHED),
-    (ResourceStatus.PUBLISHED,ResourceStatus.PUBLISHED),
-)
 
 default_layer_geoserver_setting = { 
                    "create_cache_layer": True,
@@ -76,7 +62,7 @@ class WmsServer(models.Model,ResourceStatusManagement,SignalEnable):
     geoserver_setting = models.TextField(blank=True,null=True,editable=False)
     layers = models.PositiveIntegerField(null=False,editable=False,default=0)
 
-    status = models.CharField(max_length=16,null=False,editable=False,choices=SERVER_STATUS_CHOICES)
+    status = models.CharField(max_length=32,null=False,editable=False,choices=ResourceStatus.layer_status_options)
     last_refresh_time = models.DateTimeField(null=True,editable=False)
     last_publish_time = models.DateTimeField(null=True,editable=False)
     last_unpublish_time = models.DateTimeField(null=True,editable=False)
@@ -107,10 +93,10 @@ class WmsServer(models.Model,ResourceStatusManagement,SignalEnable):
 
         if o:
             #already exist
-            self.status = self.get_next_status(o.status,ResourceStatus.UPDATED)
+            self.status = o.next_status(ResourceAction.UPDATE)
         else:
             #not exist before
-            self.status = ResourceStatus.NEW
+            self.status = ResourceStatus.New.name
         self.last_modify_time = timezone.now()
 
     @property
@@ -181,7 +167,7 @@ class WmsServer(models.Model,ResourceStatusManagement,SignalEnable):
                     existed_layer.abstract = None
     
                 if changed:                
-                    existed_layer.status = self.get_next_status(existed_layer.status,ResourceStatus.UPDATED)
+                    existed_layer.status = existed_layer.next_status(ResourceAction.UPDATE)
 
                 existed_layer.path = path
                 existed_layer.last_refresh_time = process_time
@@ -195,7 +181,7 @@ class WmsServer(models.Model,ResourceStatusManagement,SignalEnable):
                                         title=layer_title_element.text,
                                         path=path,
                                         abstract=layer_abstract_element.text if layer_abstract_element is not None else None,
-                                        status=ResourceStatus.NEW,
+                                        status=ResourceStatus.New.name,
                                         geoserver_setting = default_layer_geoserver_setting_json,
                                         last_publish_time=None,
                                         last_unpublish_time=None,
@@ -325,7 +311,7 @@ class WmsLayer(models.Model,ResourceStatusManagement,SignalEnable):
     path = models.CharField(max_length=512,null=True,editable=False)
     applications = models.TextField(blank=True,null=True,editable=False)
     geoserver_setting = models.TextField(blank=True,null=True,editable=False)
-    status = models.CharField(max_length=16, null=False, editable=False,choices=LAYER_STATUS_CHOICES)
+    status = models.CharField(max_length=32, null=False, editable=False,choices=ResourceStatus.layer_status_options)
     last_publish_time = models.DateTimeField(null=True,editable=False)
     last_unpublish_time = models.DateTimeField(null=True,editable=False)
     last_refresh_time = models.DateTimeField(null=False,editable=False)
@@ -369,9 +355,9 @@ class WmsLayer(models.Model,ResourceStatusManagement,SignalEnable):
             raise ValidationError("Not changed.")
 
         if o:
-            self.status = self.get_next_status(o.status,ResourceStatus.UPDATED)
+            self.status = o.next_status(ResourceAction.UPDATE)
         else:
-            self.status = ResourceStatus.NEW
+            self.status = ResourceStatus.New.name
 
         if self.pk:
             self.last_modify_time = timezone.now()
@@ -484,7 +470,7 @@ class WmsLayer(models.Model,ResourceStatusManagement,SignalEnable):
         """
         update layer's json for empty gwc to the repository
         """
-        if self.status not in [ResourceStatus.PUBLISHED,ResourceStatus.UPDATED]:
+        if self.publish_status.unpublished:
             #layer is not published, no need to empty gwc
             raise ValidationError("The wms layer({0}) is not published before.".format(self.name))
 
@@ -541,95 +527,94 @@ class WmsServerEventListener(object):
     @receiver(pre_delete, sender=WmsServer)
     def _pre_delete(sender, instance, **args):
         #unpublish the server first
-        target_status = instance.get_next_status(instance.status,ResourceStatus.UNPUBLISH)
-        if target_status != instance.status:
+        target_status = instance.next_status(ResourceAction.UNPUBLISH)
+        if target_status != instance.status or instance.unpublish_required:
             instance.status = target_status
             instance.save(update_fields=['status','last_unpublish_time'])
 
     @staticmethod
     @receiver(pre_save, sender=WmsServer)
     def _pre_save(sender, instance, **args):
-        if instance.status == ResourceStatus.UNPUBLISH:
+        if instance.unpublish_required:
             #unpublish all layers belonging to the server
-            for layer in WmsLayer.objects.filter(server=instance):
-                target_status = layer.get_next_status(layer.status,ResourceStatus.CASCADE_UNPUBLISH)
-                if layer.status != target_status:
+            for layer in instance.wmslayer_set.all():
+                target_status = layer.next_status(ResourceAction.CASCADE_UNPUBLISH)
+                if layer.status != target_status or layer.unpublish_required:
                     #need to unpublish
                     layer.status = target_status
                     layer.save(update_fields=["status","last_unpublish_time"])
 
             instance.unpublish()
-            #unpublish succeed, change the status to unpublished.
-            instance.status = ResourceStatus.UNPUBLISHED
             instance.last_unpublish_time = timezone.now()
-        elif instance.status == ResourceStatus.PUBLISH:       
+        elif instance.publish_required:
             instance.publish()
             #publish succeed, change the status to published.
-            instance.status = ResourceStatus.PUBLISHED
             instance.last_publish_time = timezone.now()
+            #cascade publish layers
+            for layer in instance.wmslayer_set.all():
+                target_status = layer.next_status(ResourceAction.CASCADE_PUBLISH)
+                if layer.status != target_status or layer.publish_required:
+                    #need to unpublish
+                    layer.status = target_status
+                    layer.save(update_fields=["status","last_publish_time"])
 
 class WmsLayerEventListener(object):
     @staticmethod
     @receiver(pre_delete, sender=WmsLayer)
     def _pre_delete(sender, instance, **args):
         #unpublish the layer first
-        target_status = instance.get_next_status(instance.status,ResourceStatus.UNPUBLISH)
-        if target_status != instance.status:
+        target_status = instance.next_status(ResourceAction.UNPUBLISH)
+        if target_status != instance.status or instance.unpublish_required:
             instance.status = target_status
             instance.save(update_fields=['status','last_unpublish_time'])
 
     @staticmethod
     @receiver(post_delete, sender=WmsLayer)
     def _post_delete(sender, instance, **args):
-        if instance.status != ResourceStatus.NEW:
+        if instance.status != ResourceStatus.New.name:
             refresh_select_choices.send(instance,choice_family="interested_wmslayer")
 
     @staticmethod
     @inherit_support_receiver(pre_save, sender=WmsLayer)
     def _pre_save(sender, instance, **args):
+        instance.related_publish = False
+        instance.refresh_select_options = False
         if "update_fields" in args and args['update_fields'] and "status" in args["update_fields"]:
-            if instance.status == ResourceStatus.UNPUBLISH:
+            if instance.unpublish_required:
                 instance.unpublish()
-                #unpublish succeed, change the status to unpublished.
-                instance.status = ResourceStatus.UNPUBLISHED
                 instance.last_unpublish_time = timezone.now()
-                instance.side_publish = True
-            elif instance.status == ResourceStatus.PUBLISH:
+                instance.related_publish = True
+            elif instance.publish_required:
                 #publish the server to which this layer belongs to
-                server = WmsServer.objects.get(pk = instance.server.pk)
-                target_status = server.get_next_status(server.status,ResourceStatus.DEPENDENT_PUBLISH)
-                if server.status != target_status:
+                server = instance.server
+                target_status = server.next_status(ResourceAction.DEPENDENT_PUBLISH)
+                if server.status != target_status or server.publish_required:
                     #associated wms server is not published,publish it
                     server.status = target_status
                     server.save(update_fields=["status","last_publish_time"])
                 
                 instance.publish()
-                #publish succeed, change the status to published.
-                instance.status = ResourceStatus.PUBLISHED
                 instance.last_publish_time = timezone.now()
                 #publish the resource affected by the current resource
+                instance.related_publish = True
                 dbobj = WmsLayer.objects.get(pk = instance.pk)
-                if dbobj and dbobj.is_unpublished:
-                    instance.side_publish = True
-                if not dbobj or dbobj.status == ResourceStatus.NEW:
+                if not dbobj or dbobj.status == ResourceStatus.New.name:
                     instance.refresh_select_options = True
 
     @staticmethod
     @inherit_support_receiver(post_save, sender=WmsLayer)
     def _post_save(sender, instance, **args):
-        if "update_fields" in args and args['update_fields'] and "status" in args["update_fields"]:
-            if instance.status in [ResourceStatus.PUBLISHED,ResourceStatus.UNPUBLISHED]:
-                if (hasattr(instance,"side_publish") and getattr(instance,"side_publish")):
-                    delattr(instance,"side_publish")
-                    from layergroup.models import LayerGroupLayers
-                    for layer in LayerGroupLayers.objects.filter(layer = instance):
-                        target_status = layer.group.get_next_status(layer.group.status,ResourceStatus.SIDE_PUBLISH)
-                        if target_status != layer.group.status:
-                            layer.group.status = target_status
-                            layer.group.save(update_fields=["status","last_publish_time","last_unpublish_time"])
+        if (hasattr(instance,"related_publish") and getattr(instance,"related_publish")):
+            delattr(instance,"related_publish")
+            from layergroup.models import LayerGroupLayers
+            for layer in LayerGroupLayers.objects.filter(layer = instance):
+                target_status = layer.group.next_status(ResourceAction.CASCADE_PUBLISH)
+                if target_status != layer.group.status or layer.group.publish_required:
+                    layer.group.status = target_status
+                    layer.group.save(update_fields=["status","last_publish_time","last_unpublish_time"])
 
-            if (hasattr(instance,"refresh_select_options") and getattr(instance,"refresh_select_options")):
-                delattr(instance,"refresh_select_options")
-                refresh_select_choices.send(instance,choice_family="interested_wmslayer")
+        if (hasattr(instance,"refresh_select_options") and getattr(instance,"refresh_select_options")):
+            delattr(instance,"refresh_select_options")
+            refresh_select_choices.send(instance,choice_family="interested_wmslayer")
                 
 

@@ -33,7 +33,7 @@ class Application_LayersForm(forms.ModelForm):
     """
     application = forms.ModelChoiceField(queryset=Application.objects.all(),required=True,empty_label=None)
     publish = GroupedModelChoiceField('workspace',queryset=Publish.objects.all(),required=False,choice_family="publish",choice_name="publish_choices")
-    wmslayer = GroupedModelChoiceField('server',queryset=WmsLayer.objects.filter(status__in = [ResourceStatus.UPDATED,ResourceStatus.PUBLISHED,ResourceStatus.UNPUBLISHED]),required=False,choice_family="interested_wmslayer",choice_name="interested_wmslayer_choices")
+    wmslayer = GroupedModelChoiceField('server',queryset=WmsLayer.objects.filter(status__in = ResourceStatus.interested_layer_status_names),required=False,choice_family="interested_wmslayer",choice_name="interested_wmslayer_choices")
     def __init__(self, *args, **kwargs):
         super(Application_LayersForm, self).__init__(*args, **kwargs) 
         if 'instance' in kwargs and  kwargs['instance'] and kwargs['instance'].pk:

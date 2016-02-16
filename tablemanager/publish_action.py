@@ -1,7 +1,7 @@
 from django.core.exceptions import ValidationError
 from django.db import models
 
-from borg_utils.publish_status import EnabledStatus
+from borg_utils.resource_status import ResourceStatus
 
 class PublishAction(object):
     """
@@ -89,7 +89,7 @@ class PublishAction(object):
                                 break;
                             index += 1
                 elif f.name == "status":
-                    if rel1 != EnabledStatus.instance().name:
+                    if rel1 != ResourceStatus.Enabled.name:
                         self._action = 0
                         break
                     elif rel1 != rel2:
