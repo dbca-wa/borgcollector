@@ -10,7 +10,7 @@ from django.db import transaction
 from layergroup.models import LayerGroup,LayerGroupLayers
 from layergroup.forms import LayerGroupForm,LayerGroupLayersForm
 from borg.admin import site
-from borg_utils.resource_status import ResourceStatus
+from borg_utils.resource_status import ResourceStatus,ResourceAction
 from borg_utils.hg_batch_push import try_set_push_owner, try_clear_push_owner, increase_committed_changes, try_push_to_repository
 
 logger = logging.getLogger(__name__)
@@ -24,14 +24,14 @@ class LayerGroupAdmin(admin.ModelAdmin):
     form = LayerGroupForm
 
     def publish(self,request,queryset):
-        self._change_status(request,queryset,ResourceStatus.PUBLISH,["status","last_publish_time","last_unpublish_time"])
+        self._change_status(request,queryset,ResourceAction.PUBLISH,["status","last_publish_time","last_unpublish_time"])
     publish.short_description = "Publish selected groups"
 
     def unpublish(self,request,queryset):
-        self._change_status(request,queryset,ResourceStatus.UNPUBLISH,["status","last_unpublish_time"])
+        self._change_status(request,queryset,ResourceAction.UNPUBLISH,["status","last_unpublish_time"])
     unpublish.short_description = "Unpublish selected groups"
 
-    def _change_status(self,request,queryset,status,update_fields=None):
+    def _change_status(self,request,queryset,action,update_fields=None):
         result = None
         failed_objects = []
         try_set_push_owner("layergroup_admin",enforce=True)
@@ -40,14 +40,13 @@ class LayerGroupAdmin(admin.ModelAdmin):
             for group in queryset:
                 #import ipdb;ipdb.set_trace()
                 try:
-                    target_status = group.get_next_status(group.status,status)
-                    if target_status == group.status:
+                    target_status = group.next_status(action)
+                    if target_status == group.status and not group.publish_required and not group.unpublish_required:
                         #status not changed
                         continue
                     else:
                         group.status = target_status
-
-                    group.save(update_fields=update_fields)
+                        group.save(update_fields=update_fields)
                 except:
                     logger.error(traceback.format_exc())
                     error = sys.exc_info()
@@ -123,7 +122,7 @@ class LayerGroupAdmin(admin.ModelAdmin):
         try:
             for g in queryset:
                 try:
-                    if g.status not in [ResourceStatus.PUBLISHED,ResourceStatus.UPDATED]:
+                    if g.publish_status.unpublished:
                         #Not published before.
                         failed_objects.append(("{0}:{1}".format(g.workspace,g.name),"Not published before, no need to empty gwc."))
                         continue

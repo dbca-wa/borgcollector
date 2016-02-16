@@ -18,7 +18,7 @@ from django.core.validators import RegexValidator
 from tablemanager.models import Workspace,Publish
 from wmsmanager.models import WmsLayer
 from borg_utils.borg_config import BorgConfiguration
-from borg_utils.resource_status import ResourceStatus,ResourceStatusManagement
+from borg_utils.resource_status import ResourceStatus,ResourceStatusManagement,ResourceAction
 from borg_utils.signal_enable import SignalEnable
 from borg_utils.signals import refresh_select_choices
 from borg_utils.hg_batch_push import try_set_push_owner, try_clear_push_owner, increase_committed_changes, try_push_to_repository
@@ -27,13 +27,6 @@ logger = logging.getLogger(__name__)
 
 slug_re = re.compile(r'^[a-z0-9_]+$')
 validate_slug = RegexValidator(slug_re, "Slug can only contain lowercase letters, numbers and underscores", "invalid")
-
-GROUP_STATUS_CHOICES = (
-    (ResourceStatus.NEW,ResourceStatus.NEW),
-    (ResourceStatus.UPDATED,ResourceStatus.UPDATED),
-    (ResourceStatus.PUBLISHED,ResourceStatus.PUBLISHED),
-    (ResourceStatus.UNPUBLISHED,ResourceStatus.UNPUBLISHED),
-)
 
 SRS_CHOICES = (
     ("EPSG:4283","EPSG:4283"),
@@ -49,7 +42,7 @@ class LayerGroup(models.Model,ResourceStatusManagement,SignalEnable):
     srs = models.CharField(max_length=320,null=False,choices=SRS_CHOICES)
     abstract = models.TextField(null=True,blank=True)
     geoserver_setting = models.TextField(blank=True,null=True,editable=False)
-    status = models.CharField(max_length=16, null=False, editable=False,choices=GROUP_STATUS_CHOICES)
+    status = models.CharField(max_length=32, null=False, editable=False,choices=ResourceStatus.layer_status_options)
     last_publish_time = models.DateTimeField(null=True,editable=False)
     last_unpublish_time = models.DateTimeField(null=True,editable=False)
     last_modify_time = models.DateTimeField(null=False,editable=False,default=timezone.now)
@@ -79,7 +72,7 @@ class LayerGroup(models.Model,ResourceStatusManagement,SignalEnable):
             raise ValidationError("Not changed.")
  
         if o:
-            self.status = self.get_next_status(o.status,ResourceStatus.UPDATED)
+            self.status = o.next_status(ResourceAction.UPDATE)
         else:
             self.status = ResourceStatus.NEW
             
@@ -199,8 +192,7 @@ class LayerGroup(models.Model,ResourceStatusManagement,SignalEnable):
 
     def unpublish(self):
         """
-         remove store's json reference (if exists) from the repository,
-         return True if store is removed for repository; return false, if layers does not existed in repository.
+        unpublish layer group
         """
         json_files = [ self.json_filename_abs(action) for action in [ 'publish','empty_gwc' ] ]
         #get all existing files.
@@ -225,7 +217,8 @@ class LayerGroup(models.Model,ResourceStatusManagement,SignalEnable):
 
     def publish(self):
         """
-        publish store's json reference (if exists) to the repository;
+        Only publish the member layers which is already published.
+
         """
         json_filename = self.json_filename_abs('publish');
 
@@ -236,7 +229,7 @@ class LayerGroup(models.Model,ResourceStatusManagement,SignalEnable):
             for group_layer in LayerGroupLayers.objects.filter(group=self).order_by("order"):
                 if group_layer.layer and group_layer.layer.is_published:
                     layers.append({"type":"wms_layer","name":group_layer.layer.layer_name,"store":group_layer.layer.server.name,"workspace":group_layer.layer.server.workspace.name})
-                elif group_layer.publish :
+                elif group_layer.publish and group_layer.publish.is_published:
                     layers.append({"type":"publish","name":group_layer.publish.name,"workspace":group_layer.publish.workspace.name})
                 elif group_layer.sub_group and group_layer.sub_group.is_published:
                     layers.append({"type":"group","name":group_layer.sub_group.name,"workspace":group_layer.sub_group.workspace.name})
@@ -290,7 +283,7 @@ class LayerGroup(models.Model,ResourceStatusManagement,SignalEnable):
         """
         update layer group's json for empty gwc to the repository
         """
-        if self.status not in [ResourceStatus.PUBLISHED,ResourceStatus.UPDATED]:
+        if self.publish_status.unpublished:
             #layer is not published, no need to empty gwc
             raise ValidationError("The layergroup({0}) is not published before.".format(self.name))
 
@@ -331,10 +324,10 @@ class LayerGroup(models.Model,ResourceStatusManagement,SignalEnable):
 
 
 class LayerGroupLayers(models.Model,SignalEnable):
-    group = models.ForeignKey(LayerGroup,null=False,blank=False,related_name="+")
+    group = models.ForeignKey(LayerGroup,null=False,blank=False,related_name="group_layer")
     layer = models.ForeignKey(WmsLayer,null=True,blank=False)
     publish = models.ForeignKey(Publish,null=True,blank=True,editable=False)
-    sub_group = models.ForeignKey(LayerGroup,null=True,blank=True,related_name="+",editable=False)
+    sub_group = models.ForeignKey(LayerGroup,null=True,blank=True,related_name="subgroup_layer",editable=False)
     order = models.PositiveIntegerField(null=False,blank=False)
 
     def clean(self):
@@ -413,8 +406,8 @@ class LayerGroupEventListener(object):
     @receiver(pre_delete, sender=LayerGroup)
     def _pre_delete(sender, instance, **args):
         #unpublish the group first
-        target_status = instance.get_next_status(instance.status,ResourceStatus.UNPUBLISH)
-        if target_status != instance.status:
+        target_status = instance.next_status(ResourceAction.UNPUBLISH)
+        if target_status != instance.status or instance.unpublish_required:
             instance.status = target_status
             instance.save(update_fields=['status','last_unpublish_time'])
 
@@ -426,49 +419,50 @@ class LayerGroupEventListener(object):
     @staticmethod
     @receiver(pre_save, sender=LayerGroup)
     def _pre_save(sender, instance, **args):
+        instance.related_publish = False
         if not instance.pk:
             instance.new_object = True
         if "update_fields" in args and args['update_fields'] and "status" in args["update_fields"]:
-            if instance.status == ResourceStatus.UNPUBLISH: 
+            if instance.unpublish_required: 
                 instance.unpublish()
-                #unpublish succeed, change the status to unpublished.
-                instance.status = ResourceStatus.UNPUBLISHED
                 instance.last_unpublish_time = timezone.now()
-                instance.side_publish = True
-            elif instance.status == ResourceStatus.PUBLISH:
+                instance.related_publish = True
+            elif instance.publish_required:
                 #publish the dependent layers
-                for layer in LayerGroupLayers.objects.filter(group=instance):
-                    if layer.layer:
-                        target_status = layer.layer.get_next_status(layer.layer.status,ResourceStatus.CASCADE_PUBLISH)
-                        if layer.layer.status != target_status:
-                            #dependent layer is not published, 
-                            layer.layer.status = target_status
-                            layer.layer.save(update_fields=["status","last_publish_time","last_unpublish_time"])
-                    elif layer.sub_group:
-                        target_status = layer.sub_group.get_next_status(layer.sub_group.status,ResourceStatus.CASCADE_PUBLISH)
-                        if layer.sub_group.status != target_status:
-                            #dependent group is not published, 
-                            layer.sub_group.status = target_status
-                            layer.sub_group.save(update_fields=["status","last_publish_time","last_unpublish_time"])
+                if instance.publish_status == ResourceStatus.Published:
+                    for layer in instance.group_layer.all():
+                        if layer.layer:
+                            target_status = layer.layer.next_status(ResourceAction.DEPENDENT_PUBLISH)
+                            if layer.layer.status != target_status or layer.layer.publish_required:
+                                #dependent layer is not published, 
+                                layer.layer.status = target_status
+                                layer.layer.save(update_fields=["status","last_publish_time","last_unpublish_time"])
+                        elif layer.sub_group:
+                            #publish triggered by user and try to publish the dependent sub groups
+                            target_status = layer.sub_group.next_status(ResourceAction.DEPENDENT_PUBLISH)
+                            if layer.sub_group.status != target_status or layer.sub_group.publish_required:
+                                #dependent group is not published, 
+                                layer.sub_group.status = target_status
+                                layer.sub_group.save(update_fields=["status","last_publish_time","last_unpublish_time"])
                 try:
                     instance.publish()
                 except LayerGroupEmpty:
                     #unpublish it
                     existed_instance = LayerGroup.objects.get(pk = instance.pk)
-                    target_status = instance.get_next_status(existed_instance.status,ResourceStatus.UNPUBLISH)
-                    if target_status != existed_instance.status:
+                    target_status = existed_instance.next_status(ResourceAction.CASCADE_UNPUBLISH)
+                    if target_status != existed_instance.status or existed_instance.unpublish_required:
                         instance.status = target_status
-                        LayerGroupEventListener._pre_save(sender,instance,**args)
+                        instance.unpublish()
+                        instance.last_unpublish_time = timezone.now()
+                        instance.related_publish = True
                     else:
                         instance.status = existed_instance.status
                     return
-                #publish succeed, change the status to published.
-                instance.status = ResourceStatus.PUBLISHED
                 instance.last_publish_time = timezone.now()
                 #publish the resource affected by the current resource
                 dbobj = LayerGroup.objects.get(pk = instance.pk)
                 if dbobj and dbobj.is_unpublished:
-                    instance.side_publish = True
+                    instance.related_publish = True
                 
 
     @staticmethod
@@ -478,15 +472,13 @@ class LayerGroupEventListener(object):
             delattr(instance,"new_object")
             refresh_select_choices.send(instance,choice_family="layergroup")
 
-        if "update_fields" in args and args['update_fields'] and "status" in args["update_fields"]:
-            if instance.status in [ResourceStatus.PUBLISHED,ResourceStatus.UNPUBLISHED]:
-                if (hasattr(instance,"side_publish") and getattr(instance,"side_publish")):
-                    delattr(instance,"side_publish")
-                    for layer in LayerGroupLayers.objects.filter(sub_group = instance):
-                        target_status = layer.group.get_next_status(layer.group.status,ResourceStatus.SIDE_PUBLISH)
-                        if target_status != layer.group.status:
-                            layer.group.status = target_status
-                            layer.group.save(update_fields=["status","last_publish_time","last_unpublish_time"])
+        if (hasattr(instance,"related_publish") and getattr(instance,"related_publish")):
+            delattr(instance,"related_publish")
+            for layer in instance.subgroup_layer.all():
+                target_status = layer.group.next_status(ResourceAction.CASCADE_PUBLISH)
+                if target_status != layer.group.status or layer.group.publish_required:
+                    layer.group.status = target_status
+                    layer.group.save(update_fields=["status","last_publish_time","last_unpublish_time"])
             
 
 class LayerGroupLayersEventListener(object):
@@ -495,7 +487,7 @@ class LayerGroupLayersEventListener(object):
     def _post_delete(sender, instance, **args):
         if instance.is_signal_sender("layer_delete"):
             #trigged by itself
-            instance.group.status = instance.group.get_next_status(instance.group.status,ResourceStatus.UPDATED)
+            instance.group.status = instance.group.next_status(ResourceAction.UPDATE)
             instance.group.last_modify_time = timezone.now()
             instance.group.save(update_fields=["status","last_modify_time"])
 
@@ -503,7 +495,7 @@ class LayerGroupLayersEventListener(object):
     @receiver(post_save, sender=LayerGroupLayers)
     def _post_save(sender, instance, **args):
         if instance.is_signal_sender("layer_save"):
-            instance.group.status = instance.group.get_next_status(instance.group.status,ResourceStatus.UPDATED)
+            instance.group.status = instance.group.next_status(ResourceAction.UPDATE)
             instance.group.last_modify_time = timezone.now()
             instance.group.save(update_fields=["status","last_modify_time"])
         

@@ -4,7 +4,6 @@ from wmsmanager.models import WmsLayer
 from layergroup.models import LayerGroup,LayerGroupLayers
 from tablemanager.models import Publish,Workspace
 from borg_utils.form_fields import GeoserverSettingForm,MetaTilingFactorField,GridSetField
-from borg_utils.publish_status import EnabledStatus
 from borg_utils.form_fields import GroupedModelChoiceField
 from borg_utils.resource_status import ResourceStatus
 
@@ -48,8 +47,8 @@ class LayerGroupLayersForm(forms.ModelForm):
     """
     A form for LayerGroupLayers model
     """
-    #publish = GroupedModelChoiceField('workspace',queryset=Publish.objects.filter(status=EnabledStatus.instance().name,completed__gt=0),required=False,choice_family="publish",choice_name="publish_choices")
-    layer = GroupedModelChoiceField('server',queryset=WmsLayer.objects.filter(status__in = [ResourceStatus.UPDATED,ResourceStatus.PUBLISHED,ResourceStatus.UNPUBLISHED]),required=True,choice_family="interested_wmslayer",choice_name="interested_wmslayer_choices")
+    #publish = GroupedModelChoiceField('workspace',queryset=Publish.objects.filter(status=ResourceStatus.Enabled.name,completed__gt=0),required=False,choice_family="publish",choice_name="publish_choices")
+    layer = GroupedModelChoiceField('server',queryset=WmsLayer.objects.filter(status__in = ResourceStatus.interested_layer_status_names),required=True,choice_family="interested_wmslayer",choice_name="interested_wmslayer_choices")
     group = GroupedModelChoiceField('workspace',queryset=LayerGroup.objects.all(),required=True,choice_family="layergroup",choice_name="layergroup_choices")
     #sub_group = GroupedModelChoiceField('workspace',queryset=LayerGroup.objects.all(),choice_family="layergroup",choice_name="layergroup_choices",required=False)
     def __init__(self, *args, **kwargs):
