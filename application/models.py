@@ -12,7 +12,7 @@ from tablemanager.models import Publish
 from tablemanager.publish_action import PublishAction
 from wmsmanager.models import WmsLayer
 from borg_utils.signal_enable import SignalEnable
-from borg_utils.resource_status import ResourceStatus
+from borg_utils.resource_status import ResourceStatus,ResourceAction
 
 slug_re = re.compile(r'^[a-z0-9_]+$')
 validate_slug = RegexValidator(slug_re, "Slug can only contain lowercase letters, numbers and underscores", "invalid")
@@ -89,11 +89,17 @@ class Application_Layers(models.Model,SignalEnable):
 class Application_LayersEventListener(object):
     @staticmethod
     def _update_applications(instance,editing_instance=None):
+        """
+        update the applications property of instance's publish or wms layer
+        param instance: the instance stored in db.
+        param editing_instance: the instance in the memory, it is null for deleting and post save.
+        """
         if instance.publish:
             if editing_instance and editing_instance.publish == instance.publish:
-                #publish not changed.
+                #publish is not changed.
                 pass
             else:
+                #publish is changed.
                 q = Application_Layers.objects.filter(publish=instance.publish)
                 if editing_instance and editing_instance.pk:
                     q = q.exclude(pk = editing_instance.pk)
@@ -105,7 +111,7 @@ class Application_LayersEventListener(object):
                     instance.publish.pending_actions = PublishAction(instance.publish.pending_actions).column_changed("applications").actions
                     instance.publish.save(update_fields=["applications","last_modify_time","pending_actions"])
         
-        if instance.wmslayer:
+        elif instance.wmslayer:
             if editing_instance and editing_instance.wmslayer == instance.wmslayer:
                 #wmslayer not changed.
                 pass
@@ -118,7 +124,7 @@ class Application_LayersEventListener(object):
                 if instance.wmslayer.applications != applications:
                     instance.wmslayer.applications = applications
                     instance.wmslayer.last_modify_time = timezone.now()
-                    instance.wmslayer.status = instance.wmslayer.get_next_status(instance.wmslayer.status,ResourceStatus.UPDATED)
+                    instance.wmslayer.status = instance.wmslayer.next_status(ResourceStatus.UPDATE)
                     instance.wmslayer.save(update_fields=["status","applications","last_modify_time"])
 
     @staticmethod
