@@ -169,7 +169,11 @@ class JobLogAdmin(admin.ModelAdmin):
             job_id = int(search_term)
             return self.model.objects.filter(job_id = job_id).order_by("start_time"),False
         except:
-            return super(JobLogAdmin,self).get_search_results(request,queryset,search_term)
+            if search_term:
+                return (self.model.objects.none(),False)
+            else:
+                return super(JobLogAdmin,self).get_search_results(request,queryset,search_term)
+
 
     class Media:
         js = ('/static/js/admin-model-readonly.js',)
