@@ -195,7 +195,7 @@ class Published(ResourceStatus):
 
     def next_status(self,action):
         if action == ResourceAction.UPDATE:
-            return (self.Update,False)
+            return (self.Updated,False)
         elif action == ResourceAction.PUBLISH:
             return (self.Published,True)
         elif action == ResourceAction.CASCADE_PUBLISH:
@@ -216,7 +216,7 @@ class CascadePublished(ResourceStatus):
 
     def next_status(self,action):
         if action == ResourceAction.UPDATE:
-            return (self.Update,False)
+            return (self.Updated,False)
         elif action == ResourceAction.PUBLISH:
             return (self.Published,True)
         elif action == ResourceAction.CASCADE_PUBLISH:
