@@ -3,7 +3,6 @@ import logging
 import sys,traceback,os
 import shutil
 import re
-import hashlib
 from io import open
 
 import hglib
@@ -24,17 +23,11 @@ from borg_utils.jobintervals import JobInterval
 from borg_utils.singleton import SingletonMetaclass,Singleton
 from borg_utils.borg_config import BorgConfiguration
 from borg_utils.spatial_table import SpatialTable
+from borg_utils.utils import file_md5
+from borg_utils.resource_status import ResourceStatus
 from harvest.jobstates import JobStateOutcome,JobState,Failed,Completed
 
 logger = logging.getLogger(__name__)
-
-
-def file_md5(f):
-    md5 = hashlib.md5()
-    with open(f,"rb") as f:
-        for chunk in iter(lambda: f.read(2048),b""):
-            md5.update(chunk)
-    return md5.hexdigest()
 
 class HarvestStateOutcome(JobStateOutcome):
     """
@@ -577,7 +570,7 @@ class DumpFullData(HarvestState):
 
     @classmethod
     def transition_dict(cls):
-        return {HarvestStateOutcome.succeed:ConfigGeoServer}
+        return {HarvestStateOutcome.succeed:DumpStyleFile}
 
     def execute(self,job,previous_state):
         """
@@ -618,46 +611,21 @@ class DumpFullData(HarvestState):
                 job.save(update_fields=['pgdump_file'])
             return (HarvestStateOutcome.succeed,None)
 
-class ConfigGeoServer(HarvestState):
+class DumpStyleFile(HarvestState):
     """
     The state is for configuring the geo server, and save the configuration file into file system.
     """
-    _name = "Configure GeoServer"
+    _name = "Dump style files"
 
     @classmethod
     def transition_dict(cls):
         return {HarvestStateOutcome.succeed:SubmitToVersionControl}
 
-    def get_style_file(self,job,previous_state):
-        """
-        find and copy the style file to the local repository
-        """
-        sld = job.publish.feature_style
-
-        if sld:
-            if not os.path.exists(job.dump_dir):
-                #dump dir does not exist, create it
-                os.makedirs(job.dump_dir)
-
-            file_name = job.publish.table_name + ".sld"
-            dest_file = os.path.join(job.dump_dir,file_name)
-            with open(dest_file,"wb") as f:
-                f.write(sld)
-
-            with transaction.atomic():
-                p = job.publish
-                p.style_file.save(file_name,File(open(dest_file,'rb')),False)
-                job.style_file = p.style_file
-                p.save(update_fields=['style_file'])
-                job.save(update_fields=['style_file'])
-        else:
-            p = job.publish
-            p.style_file = None
-            p.save(update_fields=['style_file'])
-
     def execute(self,job,previous_state):
         # TBD
-        self.get_style_file(job,previous_state)
+        for style in job.publish.style_set.filter(status=ResourceStatus.Enabled.name):
+            style.dump()
+
         return (HarvestStateOutcome.succeed,None)
 
 class SubmitToVersionControl(HarvestState):
@@ -689,8 +657,7 @@ class SubmitToVersionControl(HarvestState):
         json_out["spatial_type"] = SpatialTable.get_spatial_type_desc(job.publish.spatial_type)
         json_out["sync_postgres_data"] = p.workspace.publish_channel.sync_postgres_data
         json_out["sync_geoserver_data"] = p.workspace.publish_channel.sync_geoserver_data
-        json_out["dump_path"] = "{}{}".format(BorgConfiguration.MASTER_PATH_PREFIX, p.pgdump_file.path)
-        json_out["data_md5"] = file_md5(p.pgdump_file.path)
+        json_out["data"] = {"file":"{}{}".format(BorgConfiguration.MASTER_PATH_PREFIX, p.pgdump_file.path),"md5":file_md5(p.pgdump_file.path)}
         json_out["preview_path"] = "{}{}".format(BorgConfiguration.MASTER_PATH_PREFIX, settings.PREVIEW_ROOT)
         json_out["applications"] = ["{0}:{1}".format(o.application,o.order) for o in Application_Layers.objects.filter(publish=p)]
         json_out["title"] = p.title
@@ -700,9 +667,13 @@ class SubmitToVersionControl(HarvestState):
 
         if p.geoserver_setting:
             json_out["geoserver_setting"] = json.loads(p.geoserver_setting)
-        if p.workspace.publish_channel.sync_geoserver_data and p.style_file:
-            json_out["style_path"] = "{}{}".format(BorgConfiguration.MASTER_PATH_PREFIX, p.style_file.path)
-            json_out["style_md5"] = file_md5(p.style_file.path)
+
+        json_out["default_style"] = p.default_style.name if p.default_style else None
+        json_out["styles"] = {}
+        dump_file = None
+        for style in p.style_set.filter(status=ResourceStatus.Enabled.name):
+            dump_file = style.dump_file
+            json_out["styles"][style.name] = {"file":"{}{}".format(BorgConfiguration.MASTER_PATH_PREFIX,dump_file),"md5":file_md5(dump_file)}
 
         #bbox
         if SpatialTable.check_spatial(job.publish.spatial_type):
