@@ -29,7 +29,6 @@ from django.core.exceptions import ValidationError,ObjectDoesNotExist
 from django.core.validators import RegexValidator
 from django.template import Context, Template
 from django.contrib import messages
-from django.core.files.storage import FileSystemStorage
 from django.conf import settings
 from django.utils.safestring import SafeText
 
@@ -52,22 +51,9 @@ from borg_utils.utils import file_md5
 
 logger = logging.getLogger(__name__)
 
+  
 slug_re = re.compile(r'^[a-z0-9_]+$')
 validate_slug = RegexValidator(slug_re, "Slug can only contain lowercase letters, numbers and underscores", "invalid")
-
-
-class DownloadFileSystemStorage(FileSystemStorage):
-    def __init__(self,**kwargs):
-        kwargs["location"] = settings.DOWNLOAD_ROOT
-        kwargs["base_url"] = settings.DOWNLOAD_URL
-        super(DownloadFileSystemStorage,self).__init__(**kwargs)
-
-    def save(self,name,content=None):
-        #name should always points to a existing file.
-        #import ipdb; ipdb.set_trace()
-        return name
-
-downloadFileSystemStorage = DownloadFileSystemStorage()
 
 def in_schema(search, db_url=None,input_schema=None,trans_schema=None,normal_schema=None):
     if db_url:
@@ -1783,12 +1769,6 @@ STATUS_CHOICES = (
     (3, "failed")
 )
 
-def get_full_data_file_name(instance,filename):
-    if instance.workspace.workspace_as_schema:
-        return 'full_data/{0}/{1}/{2}/{3}'.format(instance.workspace.publish_channel.name,instance.workspace.name,instance.job_batch_id,filename)
-    else:
-        return 'full_data/{0}/{1}/{2}'.format(instance.workspace.publish_channel.name,instance.job_batch_id,filename)
-
 class Publish(Transform,ResourceStatusManagement,SignalEnable):
     """
     A feature, whose data is derived from input and normal table, will be published to slave server and then can be accessed through kmi.
@@ -1811,8 +1791,6 @@ class Publish(Transform,ResourceStatusManagement,SignalEnable):
     create_extra_index_sql = SQLField(null=True, editable=True,blank=True)
     priority = models.PositiveIntegerField(default=1000)
     default_style = models.ForeignKey('Style',null=True,on_delete=models.SET_NULL,related_name="+")
-    pgdump_file = models.FileField(upload_to=get_full_data_file_name,storage=downloadFileSystemStorage,null=True,editable=False)
-    style_file = models.FileField(upload_to=get_full_data_file_name,storage=downloadFileSystemStorage,null=True,editable=False)
     create_table_sql = SQLField(null=True, editable=False)
     applications = models.TextField(blank=True,null=True,editable=False)
     geoserver_setting = models.TextField(blank=True,null=True,editable=False)
@@ -2159,8 +2137,14 @@ class Publish(Transform,ResourceStatusManagement,SignalEnable):
             #prepare publish styles.
             json_out["default_style"] = self.default_style.name if self.default_style else None
             json_out["styles"] = {}
-            for style in self.style_set.filter(status==ResourceStatus.Enabled.name):
-                dump_file = style.dump()
+
+            if self.workspace.workspace_as_schema:
+                style_file_folder = os.path.join(BorgConfiguration.STYLE_FILE_DUMP_DIR,self.workspace.publish_channel.name, self.workspace.name)
+            else:
+                style_file_folder = os.path.join(BorgConfiguration.STYLE_FILE_DUMP_DIR,self.workspace.publish_channel.name)
+
+            for style in self.style_set.filter(status=ResourceStatus.Enabled.name):
+                dump_file = style.dump(style_file_folder)
                 json_out["styles"][style.name] = {"file":"{}{}".format(BorgConfiguration.MASTER_PATH_PREFIX,dump_file),"md5":file_md5(dump_file)}
 
             #create the dir if required
@@ -2524,34 +2508,25 @@ class Style(BorgModel,ResourceStatusManagement):
 
         return sld
 
-    @property
-    def dump_file(self):
+    def dump_file(self,folder):
         """
         Return the dump file 
         """
         #prepare style file
-        style_file_folder = None
-        if self.publish.workspace.workspace_as_schema:
-            style_file_folder = os.path.join(BorgConfiguration.STYLE_FILE_DUMP_DIR,self.publish.workspace.publish_channel.name, self.publish.workspace.name)
-        else:
-            style_file_folder = os.path.join(BorgConfiguration.STYLE_FILE_DUMP_DIR,self.publish.workspace.publish_channel.name)
-
         style_file_name = "{}.sld".format(self.publish.table_name) if self.name == "builtin" else "{}.{}.sld".format(self.publish.table_name,self.name)
 
-        style_file = os.path.join(style_file_folder,style_file_name)
+        style_file = os.path.join(folder,style_file_name)
 
         return style_file
 
 
-    def dump(self):
+    def dump(self,folder):
         """
         dump the style to a file
         Return the file name
         """
-        style_file = self.dump_file
-        style_file_folder = os.path.dirname(style_file)
-
-        if not os.path.exists(style_file_folder):
+        style_file = self.dump_file(folder)
+        if not os.path.exists(folder):
             #dump dir does not exist, create it
             os.makedirs(style_file_folder)
 

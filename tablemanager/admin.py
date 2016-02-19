@@ -598,7 +598,7 @@ class NormaliseAdmin(VersionAdmin,JobFields):
 
 class PublishAdmin(VersionAdmin,JobFields):
     list_display = ("name","workspace","spatial_type_desc","_default_style","interval","_enabled","_publish_content","_job_id", "_job_batch_id", "_job_status","waiting","running","completed","failed")
-    readonly_fields = ("_default_style","applications","_create_table_sql","spatial_type_desc","_style_file","_table_data","last_modify_time","_publish_content","_job_batch_id","_job_id","_job_status","_job_message","waiting","running","completed","failed")
+    readonly_fields = ("_default_style","applications","_create_table_sql","spatial_type_desc","last_modify_time","_publish_content","_job_batch_id","_job_id","_job_status","_job_message","waiting","running","completed","failed")
     search_fields = ["name","status","workspace__name"]
 
     #form = PublishForm
@@ -646,21 +646,6 @@ class PublishAdmin(VersionAdmin,JobFields):
             return ""
     _default_style.allow_tags = True
     _default_style.short_description = "Default Style"
-
-    def _style_file(self,o):
-        if o.style_file:
-            return "<a href='{0}' target='_blank'>Download</a>".format(o.style_file.url)
-        else:
-            return ""
-    _style_file.allow_tags = True
-    _style_file.short_description = "Style file"
-
-    def _table_data(self,o):
-        if o.pgdump_file:
-            return "<a href='{0}' target='_blank'>Download</a>".format(o.pgdump_file.url)
-        else:
-            return ''
-    _table_data.allow_tags = True
 
     def custom_delete_selected(self,request,queryset):
         if request.POST.get('post') != 'yes':

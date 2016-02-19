@@ -14,7 +14,7 @@ def harvest(modeladmin, request, queryset):
 harvest.short_description = "Harvest and update selected outputs"
 
 class JobAdmin(admin.ModelAdmin):
-    readonly_fields = ("id","batch_id","_publish","job_type", "state","job_action" ,"previous_state", "_message","retry_times","last_execution_end_time", "created", "launched", "finished","_table_data","_style_file","sync_status","job_logs")
+    readonly_fields = ("id","batch_id","_publish","job_type", "state","job_action" ,"previous_state", "_message","retry_times","last_execution_end_time", "created", "launched", "finished","sync_status","job_logs")
     list_display = ("id","batch_id", "_publish","job_type", "state", "created", "launched", "finished","job_action","sync_status","job_logs")
     search_fields = ["publish__name","batch_id"]
     actions = None
@@ -72,29 +72,13 @@ class JobAdmin(admin.ModelAdmin):
         else:
             return ""
     sync_status.allow_tags = True
-    sync_status.short_description = "Logs"
+    sync_status.short_description = "Sync Status"
 
     def has_add_permission(self,request):
         return False
 
     def has_delete_permission(self,request,obj=None):
         return False
-
-
-    def _style_file(self,o):
-        if o.style_file:
-            return "<a href='{0}' target='_blank'>Download</a>".format(o.style_file.url)
-        else:
-            return ""
-    _style_file.short_description = "Style file"
-
-    def _table_data(self,o):
-        if o.pgdump_file:
-            return "<a href='{0}' target='_blank'>Download</a>".format(o.pgdump_file.url)
-        else:
-            return ''
-    _table_data.allow_tags = True
-    _table_data.short_description = "Table Data"
 
     class Media:
         js = ('/static/js/admin-model-readonly.js',)

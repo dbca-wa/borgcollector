@@ -25,8 +25,8 @@ class Migration(migrations.Migration):
                 ('created', models.DateTimeField(default=django.utils.timezone.now, editable=False)),
                 ('launched', models.DateTimeField(null=True, editable=False, blank=True)),
                 ('finished', models.DateTimeField(null=True, editable=False, blank=True)),
-                ('pgdump_file', models.FileField(storage=tablemanager.models.DownloadFileSystemStorage(), upload_to=harvest.models.get_full_data_file_name, null=True, editable=False)),
-                ('style_file', models.FileField(storage=tablemanager.models.DownloadFileSystemStorage(), upload_to=harvest.models.get_full_data_file_name, null=True, editable=False)),
+                ('pgdump_file', models.FileField(null=True, editable=False)),
+                ('style_file', models.FileField(null=True, editable=False)),
                 ('publish', models.ForeignKey(editable=False, to='tablemanager.Publish')),
             ],
             options={
