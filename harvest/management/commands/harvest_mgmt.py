@@ -13,7 +13,7 @@ from borg_utils.jobintervals import JobInterval,Manually,Realtime,Triggered,Hour
 from harvest.jobstatemachine import JobStatemachine
 from harvest.models import Process
 from harvest.jobcleaner import HarvestJobCleaner
-from harvest.harvest_ds_modifytime import HarvestModifyTime
+from harvest.harvest_ds import HarvestDatasource
 
 logger = logging.getLogger(__name__)
 
@@ -150,7 +150,7 @@ class CheckDsJob(RepeatedJob):
         return "{} datasources have been changed,{} builtin publish styles are reloaded, {} builtin publish styles are removed."
 
     def execute(self,time):
-        return HarvestModifyTime(True,0).harvest()
+        return HarvestDatasource(True,0).harvest()
 
 class CleanJob(RepeatedJob):
     @property

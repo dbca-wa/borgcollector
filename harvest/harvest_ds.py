@@ -17,7 +17,7 @@ from tablemanager.models import Input,Style
 
 logger = logging.getLogger(__name__)
 
-class HarvestModifyTime(object):
+class HarvestDatasource(object):
     def __init__(self,check,check_interval,async=False):
         self._check = check
         self._check_interval = check_interval
@@ -62,7 +62,7 @@ class HarvestModifyTime(object):
                     if builtin_style_file:
                         #have builtin style
                         builtin_style = existing_builtin_style or Style(name="builtin",description=builtin_style_file,status=ResourceStatus.Enabled.name,publish=p)
-                        builtin_style.last_modify_time = timezone.now()
+                        builtin_style.last_modify_time = new_modify_time
                         with open(builtin_style_file) as f:
                             builtin_style.sld = f.read()
                         builtin_style.sld = builtin_style.format_style()
@@ -109,7 +109,7 @@ class HarvestModifyTime(object):
         if not self._check: return None
         if self._check_interval > 0:
             if self._async:
-                t = threading.Thread(name="harvest_ds_modify_time",target=self)
+                t = threading.Thread(name="harvest_ds",target=self)
                 t.setDaemon(True)
                 t.start()
             else:
