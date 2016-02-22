@@ -356,8 +356,10 @@ class JobStatemachine(object):
                     job.metadata = json_data
                     job.save(update_fields=['previous_state','state','message','retry_times','last_execution_end_time','user_action','metadata'])
             elif job.metadict:
-                    job.metadata = json.dumps(job.metadict)
-                    job.save(update_fields=['previous_state','state','message','retry_times','last_execution_end_time','user_action','metadata'])
+                job.metadata = json.dumps(job.metadict)
+                job.save(update_fields=['previous_state','state','message','retry_times','last_execution_end_time','user_action','metadata'])
+            else
+                job.save(update_fields=['previous_state','state','message','retry_times','last_execution_end_time','user_action'])
 
             if log:
                 log.save()
