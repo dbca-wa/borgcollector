@@ -358,7 +358,7 @@ class JobStatemachine(object):
             elif job.metadict:
                 job.metadata = json.dumps(job.metadict)
                 job.save(update_fields=['previous_state','state','message','retry_times','last_execution_end_time','user_action','metadata'])
-            else
+            else:
                 job.save(update_fields=['previous_state','state','message','retry_times','last_execution_end_time','user_action'])
 
             if log:
