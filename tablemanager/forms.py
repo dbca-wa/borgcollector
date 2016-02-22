@@ -5,7 +5,7 @@ from django.forms.widgets import HiddenInput,TextInput
 
 from tablemanager.models import (Normalise,NormalTable,Normalise_NormalTable,Publish,
         Publish_NormalTable,ForeignTable,Input,NormalTable,Workspace,ForeignServer,DataSource,
-        PublishChannel)
+        PublishChannel,Style)
 from borg_utils.form_fields import GroupedModelChoiceField
 from borg_utils.widgets import MultiWidgetLayout
 from borg_utils.form_fields import GeoserverSettingForm,MetaTilingFactorField,GridSetField
@@ -247,7 +247,7 @@ class PublishForm(NormalTablePublishForm,GeoserverSettingForm):
     """
     A form for spatial table's Publish Model
     """
-    create_cache_layer = forms.BooleanField(required=False,label="create_cache_layer",initial={"enabled":True})
+    create_cache_layer = forms.BooleanField(required=False,label="create_cache_layer",initial=True)
     create_cache_layer.setting_type = "geoserver_setting"
 
     server_cache_expire = forms.IntegerField(label="server_cache_expire",min_value=0,required=False,initial=0,help_text="Expire server cache after n seconds (set to 0 to use source setting)")
@@ -275,5 +275,51 @@ class PublishForm(NormalTablePublishForm,GeoserverSettingForm):
 
     class Meta:
         model = Publish
-        fields = ('name','workspace','interval','status','input_table','dependents','priority','kmi_title','kmi_abstract','sql','create_extra_index_sql','sld')
+        fields = ('name','workspace','interval','status','input_table','dependents','priority','kmi_title','kmi_abstract','sql','create_extra_index_sql')
+
+class StyleForm(BorgModelForm):
+    """
+    A form for spatial table's Style Model
+    """
+    default_style = forms.BooleanField(required=False,initial=False)
+
+    def __init__(self, *args, **kwargs):
+        kwargs['initial']=kwargs.get('initial',{})
+        instance = None
+        if 'instance' in kwargs and  kwargs['instance']:
+            instance = kwargs['instance']
+
+        if instance:
+            kwargs['initial']['default_style'] = kwargs['instance'].default_style
+
+        super(StyleForm, self).__init__(*args, **kwargs)
+
+        builtin_style = False
+        if instance and instance.pk:
+            self.fields['name'].widget.attrs['readonly'] = True
+            self.fields['publish'] = forms.ModelChoiceField(queryset=Publish.objects.filter(pk=kwargs['instance'].publish.pk))
+            builtin_style = instance.name == "builtin"
+            if builtin_style:
+                self.fields['description'].widget.attrs['readonly'] = True
+        
+        options = json.loads(self.fields['sld'].widget.option_json)
+        options['readOnly'] = builtin_style
+        #import ipdb;ipdb.set_trace()
+        self.fields['sld'].widget.option_json = json.dumps(options)
+
+
+
+    def _post_clean(self):
+        self.instance.set_default_style = self.cleaned_data['default_style']
+        super(StyleForm,self)._post_clean()
+        if self.errors:
+            return
+
+
+    class Meta:
+        model = Style
+        fields = ('name','publish','description','status','default_style','sld')
+        widgets = {
+                "description": forms.TextInput(attrs={"style":"width:95%"})
+        }
 

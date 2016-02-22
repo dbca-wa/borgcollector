@@ -1,5 +1,6 @@
 import os
 import socket
+import json
 from datetime import timedelta
 
 from django.db import models
@@ -9,16 +10,10 @@ from django.utils import timezone
 
 from borg_utils.borg_config import BorgConfiguration
 
-from tablemanager.models import Publish,downloadFileSystemStorage
+from tablemanager.models import Publish
 from harvest.jobstates import JobState
 from borg_utils.jobintervals import Manually
 
-def get_full_data_file_name(instance,filename):
-    if instance.publish.workspace.workspace_as_schema:
-        return 'full_data/{0}/{1}/{2}/{3}'.format(instance.publish.workspace.publish_channel.name,instance.publish.workspace.name,instance.batch_id,filename)
-    else:
-        return 'full_data/{0}/{1}/{2}'.format(instance.publish.workspace.publish_channel.name,instance.batch_id,filename)
-  
 class Process(models.Model):
     current_server=socket.getfqdn()
     current_pid=os.getpid()
@@ -85,8 +80,7 @@ class Job(models.Model):
     launched = models.DateTimeField(null=True, blank=True, editable=False)
     finished = models.DateTimeField(null=True, blank=True, editable=False)
     job_type = models.CharField(max_length=32,default='Monthly',editable=False,null=False)
-    pgdump_file = models.FileField(upload_to=get_full_data_file_name,storage=downloadFileSystemStorage,null=True,editable=False)
-    style_file = models.FileField(upload_to=get_full_data_file_name,storage=downloadFileSystemStorage,null=True,editable=False)
+    metadata = models.TextField(null = True, editable=False)
 
     @property
     def normaltables(self):
@@ -101,6 +95,14 @@ class Job(models.Model):
         the sorted related normalises 
         """
         return self.publish.normalises
+
+    @property
+    def metadict(self):
+        if hasattr(self,"_metadict"):
+            return self._metadict
+        else:
+            setattr(self,"_metadict",json.loads(self.metadata) if self.metadata else {})
+            return self._metadict
 
     @property 
     def is_manually_created(self):
@@ -133,19 +135,18 @@ class JobEventListener(object):
         if instance.state and not JobState.get_jobstate(instance.state).is_end_state:
             raise Exception("Unfinished job can not be deleted.")
         #remove the dump file if exist
-        if instance.pgdump_file:
-            dump_path = instance.pgdump_file.path
-            if os.path.isfile(dump_path):
-                os.remove(dump_path)
-            #remove the style file if exist
-            if instance.style_file:
-                style_path = instance.style_file.path
-                if os.path.isfile(style_path):
-                    os.remove(style_path)
-            #remove the folder, if empty
-            folder = os.path.dirname(dump_path)
-            if os.path.exists(folder) and len(os.listdir(folder)) == 0:
-                os.rmdir(folder)
+        dump_dir = instance.dump_dir
+        if os.path.exists(dump_dir):
+            existed_files = 0
+            for f in os.listdir(dump_dir):
+                if f.startswith(instance.publish.table_name + "."):
+                    #the file belongs to the job,remove it
+                    os.remove(os.path.join(dump_dir,f))
+                else:
+                    existed_files += 1
+
+            if not existed_files:
+                os.rmdir(dump_dir)
 
 
 class JobLog(models.Model):
