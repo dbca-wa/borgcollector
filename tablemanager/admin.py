@@ -9,19 +9,19 @@ from django.core.urlresolvers import reverse
 from django.contrib import messages
 from django.http import HttpResponseRedirect
 from django.utils.safestring import mark_safe
+from django.utils import timezone
 
 from tablemanager.models import (
     ForeignServer,ForeignTable, Input, NormalTable,
     Normalise, Workspace, Publish, Replica,
-    Normalise_NormalTable,
+    Normalise_NormalTable,Style,
     PublishChannel,DataSource
 )
 from tablemanager.forms import (
     NormaliseForm,NormalTablePublishForm,PublishForm,ForeignServerForm,ForeignTableForm,
     InputForm,NormalTableForm,WorkspaceForm,DataSourceForm,
-    PublishChannelForm
+    PublishChannelForm,StyleForm
 )
-from tablemanager.publish_action import PublishAction
 from harvest.models import Job
 from harvest.jobstates import JobState
 from borg.admin import site
@@ -597,8 +597,8 @@ class NormaliseAdmin(VersionAdmin,JobFields):
         return actions 
 
 class PublishAdmin(VersionAdmin,JobFields):
-    list_display = ("name","workspace","spatial_type_desc","interval","status","_publish_content","_job_id", "_job_batch_id", "_job_status","waiting","running","completed","failed")
-    readonly_fields = ("applications","_create_table_sql","spatial_type_desc","_style_file","_table_data","last_modify_time","_publish_content","_job_batch_id","_job_id","_job_status","_job_message","waiting","running","completed","failed")
+    list_display = ("name","workspace","spatial_type_desc","_default_style","interval","_enabled","_publish_content","_job_id", "_job_batch_id", "_job_status","waiting","running","completed","failed")
+    readonly_fields = ("_default_style","applications","_create_table_sql","spatial_type_desc","last_modify_time","_publish_content","_job_batch_id","_job_id","_job_status","_job_message","waiting","running","completed","failed")
     search_fields = ["name","status","workspace__name"]
 
     #form = PublishForm
@@ -612,6 +612,12 @@ class PublishAdmin(VersionAdmin,JobFields):
         else:
             return PublishForm
         
+
+    def _enabled(self,o):
+        return o.status == ResourceStatus.Enabled.name
+
+    _enabled.boolean = True
+    _enabled.short_description = "Enabled"
 
     def _publish_content(self,o):
         result = o.is_up_to_date()
@@ -633,20 +639,13 @@ class PublishAdmin(VersionAdmin,JobFields):
     _create_table_sql.short_description = "CREATE info for table"
 
 
-    def _style_file(self,o):
-        if o.style_file:
-            return "<a href='{0}' target='_blank'>Download</a>".format(o.style_file.url)
+    def _default_style(self,o):
+        if o.default_style:
+            return "<a href='/tablemanager/style/{}/'>{}</a>".format(o.default_style.pk,o.default_style.name)
         else:
             return ""
-    _style_file.short_description = "Style file"
-
-    def _table_data(self,o):
-        if o.pgdump_file:
-            return "<a href='{0}' target='_blank'>Download</a>".format(o.pgdump_file.url)
-        else:
-            return ''
-
-    _table_data.allow_tags = True
+    _default_style.allow_tags = True
+    _default_style.short_description = "Default Style"
 
     def custom_delete_selected(self,request,queryset):
         if request.POST.get('post') != 'yes':
@@ -737,7 +736,6 @@ class PublishAdmin(VersionAdmin,JobFields):
             if publish.status != ResourceStatus.Enabled.name:
                 #status is changed
                 publish.status = ResourceStatus.Enabled.name
-                publish.pending_actions = PublishAction.publish_all_action
                 try:
                     publish.save(update_fields=['status','pending_actions'])
                 except:
@@ -865,12 +863,102 @@ class PublishAdmin(VersionAdmin,JobFields):
         actions['delete_selected'] = (PublishAdmin.custom_delete_selected,self.default_delete_action[1],self.default_delete_action[2])
         return actions 
 
+class StyleAdmin(VersionAdmin):
+    list_display = ("id","publish","name","_default_style","_enabled","last_modify_time")
+    search_fields = ["name","status","publish__name"]
+
+    form = StyleForm
+
+    def _default_style(self,o):
+        return o.default_style if o else False
+
+    _default_style.boolean = True
+    _default_style.short_description = "Default Style"
+
+    def _enabled(self,o):
+        return o.status == ResourceStatus.Enabled.name
+
+    _enabled.boolean = True
+    _enabled.short_description = "Enabled"
+
+    def enable_style(self,request,queryset):
+        result = None
+        failed_objects = []
+        for publishStyle in queryset:
+            #modify the table data
+            if publishStyle.status != ResourceStatus.Enabled.name:
+                #status is changed
+                publishStyle.status = ResourceStatus.Enabled.name
+                publishStyle.last_modify_time = timezone.now()
+                try:
+                    publishStyle.save(update_fields=['status','last_modify_time'])
+                except:
+                    error = sys.exc_info()
+                    failed_objects.append(("{0}:{1}:{2}".format(publishStyle.publish.workspace.name,publishStyle.publish.name,publishStyle.name),traceback.format_exception_only(error[0],error[1])))
+                    #update table failed, continue to process the next publish
+                    continue
+
+        if failed_objects:
+            messages.warning(request, mark_safe("Enable failed for some selected styles:<ul>{0}</ul>".format("".join(["<li>{0} : {1}</li>".format(o[0],o[1]) for o in failed_objects]))))
+        else:
+            messages.success(request, "Enable successfully for all selected styles")
+
+    enable_style.short_description = "Enable selected styles"
+
+    def disable_style(self,request,queryset):
+        result = None
+        failed_objects = []
+        #import ipdb;ipdb.set_trace()
+        for publishStyle in queryset:
+            try:
+                if publishStyle.status != ResourceStatus.Disabled.name:
+                    publishStyle.status = ResourceStatus.Disabled.name
+                    publishStyle.last_modify_time = timezone.now()
+                    publishStyle.save(update_fields=['status','last_modify_time'])
+            except:
+                error = sys.exc_info()
+                failed_objects.append(("{0}:{1}:{2}".format(publishStyle.publish.workspace.name,publishStyle.publish.name,publishStyle.name),traceback.format_exception_only(error[0],error[1])))
+                continue
+
+        if failed_objects:
+            messages.warning(request, mark_safe("Disable failed for some selected styles:<ul>{0}</ul>".format("".join(["<li>{0} : {1}</li>".format(o[0],o[1]) for o in failed_objects]))))
+        else:
+            messages.success(request, "Disable successfully for all selected styles")
+
+    disable_style.short_description = "Disable selected styles"
+
+    def set_default_style(self,request,queryset):
+        result = None
+        failed_objects = []
+        #import ipdb;ipdb.set_trace()
+        for publishStyle in queryset:
+            try:
+                if publishStyle.status == ResourceStatus.Disabled.name:
+                    failed_objects.append(("{0}:{1}:{2}".format(publishStyle.publish.workspace.name,publishStyle.publish.name,publishStyle.name),"Can't set disabled style as default style."))
+                else:
+                    publishStyle.publish.last_modify_time = timezone.now()
+                    publishStyle.publish.default_style = publishStyle
+                    publishStyle.publish.save(update_fields=['default_style','last_modify_time'])
+            except:
+                error = sys.exc_info()
+                failed_objects.append(("{0}:{1}:{2}".format(publishStyle.publish.workspace.name,publishStyle.publish.name,publishStyle.name),traceback.format_exception_only(error[0],error[1])))
+                continue
+
+        if failed_objects:
+            messages.warning(request, mark_safe("Set default style failed for some selected styles:<ul>{0}</ul>".format("".join(["<li>{0} : {1}</li>".format(o[0],o[1]) for o in failed_objects]))))
+        else:
+            messages.success(request, "Set default style successfully for all selected styles")
+
+    set_default_style.short_description = "Set default style"
+
+    actions = ['enable_style','set_default_style','disable_style']
     
 site.register(Workspace, WorkspaceAdmin)
 site.register(ForeignServer, ForeignServerAdmin)
 site.register(ForeignTable, ForeignTableAdmin)
 site.register(Input, InputAdmin)
 site.register(Publish, PublishAdmin)
+site.register(Style, StyleAdmin)
 site.register(Normalise, NormaliseAdmin)
 site.register(NormalTable, NormalTableAdmin)
 site.register(PublishChannel, PublishChannelAdmin)
