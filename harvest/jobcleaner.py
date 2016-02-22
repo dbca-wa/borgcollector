@@ -20,7 +20,6 @@ class HarvestJobCleaner(object):
         """
         clean the outdated jobs.
         """
-        #import ipdb;ipdb.set_trace()
         #find all publishes which has published at least one time
         outdated_date = None
         if self.expire_days:

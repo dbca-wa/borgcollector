@@ -1,4 +1,5 @@
 import logging
+import json
 from datetime import timedelta,datetime
 import time
 
@@ -346,7 +347,18 @@ class JobStatemachine(object):
 
             job.last_execution_end_time = timezone.now()
             job.message = state_result[1]
-            job.save(update_fields=['previous_state','state','message','retry_times','last_execution_end_time','user_action'])
+            json_data = json.dumps(job.metadict)
+            if job.metadata:
+                json_data = json.dumps(job.metadict)
+                if job.metadata == json_data:
+                    job.save(update_fields=['previous_state','state','message','retry_times','last_execution_end_time','user_action'])
+                else:
+                    job.metadata = json_data
+                    job.save(update_fields=['previous_state','state','message','retry_times','last_execution_end_time','user_action','metadata'])
+            elif job.metadict:
+                    job.metadata = json.dumps(job.metadict)
+                    job.save(update_fields=['previous_state','state','message','retry_times','last_execution_end_time','user_action','metadata'])
+
             if log:
                 log.save()
 
