@@ -35,7 +35,6 @@ from django.utils.safestring import SafeText
 import hglib
 from codemirror import CodeMirrorTextarea
 from sqlalchemy import create_engine
-from dj_database_url import parse
 
 from borg_utils.gdal import detect_epsg
 from borg_utils.spatial_table import SpatialTable
@@ -142,13 +141,13 @@ def switch_searchpath(cursor_pos=1,searchpath="{2}," + BorgConfiguration.BORG_SC
 class XMLField(models.TextField):
     def formfield(self, **kwargs):
         field = super(XMLField, self).formfield(**kwargs)
-        field.widget = CodeMirrorTextarea(mode="xml", theme="mdn-like",config={"lineWrapping":True,"readOnly":True})
+        field.widget = CodeMirrorTextarea(mode="xml", theme="mdn-like",config={"lineWrapping":True})
         return field
 
 class DatasourceWidget(CodeMirrorTextarea):
     def render(self,name,value,attrs=None):
         html = super(DatasourceWidget,self).render(name,value,attrs)
-        html = SafeText('<script src="/static/js/borg.js"></script><input type="button" value="Insert Fields" onclick="insert_datasource_fields(this)">' + str(html))
+        html = SafeText('<input type="submit" name="_insert_fields" value="Insert Fields" onclick="this.value=\'processing\';">' + str(html))
         return html
 
 class DatasourceField(models.TextField):
@@ -178,22 +177,37 @@ class JobFields(BorgModel):
     class Meta:
         abstract = True
 
+class DatasourceType(object):
+    FILE_SYSTEM = "FileSystem"
+    DATABASE = "Database"
+
+    options = (
+        (FILE_SYSTEM,FILE_SYSTEM),
+        (DATABASE,DATABASE)
+    )
+
 @python_2_unicode_compatible
-class ForeignServer(BorgModel,SignalEnable):
+class DataSource(BorgModel,SignalEnable):
     """
-    Represents a foreign server from which the foreign table should be harvested.
+    Represents a data source which the input is belonging to
 
     """
-    name = models.SlugField(max_length=255, unique=True, help_text="The name of foreign server", validators=[validate_slug])
-    user = models.CharField(max_length=320)
-    password = models.CharField(max_length=320)
-    sql = SQLField(default="CREATE SERVER {{self.name}} FOREIGN DATA WRAPPER oracle_fdw OPTIONS (dbserver '//<hostname>/<sid>');")
+    name = models.SlugField(max_length=255, unique=True, help_text="The name of data source", validators=[validate_slug])
+    type = models.CharField(max_length=32, choices=DatasourceType.options,default="FileSystem", help_text="The type of data source")
+    description = models.CharField(max_length=255, null=True,blank=True)
+    user = models.CharField(max_length=320,null=True,blank=True)
+    password = models.CharField(max_length=320,null=True,blank=True)
+    sql = SQLField(default="CREATE SERVER {{self.name}} FOREIGN DATA WRAPPER oracle_fdw OPTIONS (dbserver '//<hostname>/<sid>');",null=True,blank=True)
+    vrt = XMLField(help_text="GDAL VRT template in xml", default="")
     last_modify_time = models.DateTimeField(auto_now=False,auto_now_add=True,editable=False,default=timezone.now,null=False)
 
     def drop(self,cursor,schema,name):
         """
         drop the foreign server from specified schema
         """
+        if self.type != DatasourceType.DATABASE:
+            return
+
         cursor.execute("DROP SERVER IF EXISTS {0} CASCADE;".format(name))
 
     @switch_searchpath()
@@ -201,6 +215,9 @@ class ForeignServer(BorgModel,SignalEnable):
         """
         create the foreign server in specified schema
         """
+        if self.type != DatasourceType.DATABASE:
+            return
+
         if self.name == name:
             #not in validation mode
             context = Context({"self": self})
@@ -219,18 +236,23 @@ class ForeignServer(BorgModel,SignalEnable):
 
     @in_schema(BorgConfiguration.TEST_SCHEMA, db_url=settings.FDW_URL)
     def clean(self, cursor,schema):
-        self.sql = None if not self.sql else self.sql.strip()
-        if not self.sql:
-            raise ValidationError("Sql can't be empty.")
-        #check whether sql is ascii string
-        try:
-            self.sql = codecs.encode(self.sql,'ascii')
-        except :
-            raise ValidationError("Sql contains non ascii character.")
+        if self.type == DatasourceType.DATABASE :
+            if not self.user:
+                raise ValidationError("User can't be empty.")
+
+            if not self.password:
+                raise ValidationError("Password can't be empty.")
+
+            if not self.sql:
+                raise ValidationError("Sql can't be empty.")
+            #check whether sql is ascii string
+            try:
+                self.sql = codecs.encode(self.sql,'ascii')
+            except :
+                raise ValidationError("Sql contains non ascii character.")
 
         name = "test_" + self.name
         try:
-            #import ipdb; ipdb.set_trace()
             self.drop(cursor,schema,name)
             self.create(cursor,schema,name)
             #after validation, clear testing server and testing foreign table
@@ -252,50 +274,62 @@ class ForeignServer(BorgModel,SignalEnable):
 
     def delete(self,using=None):
         logger.info('Delete {0}:{1}'.format(type(self),self.name))
-        if try_set_push_owner("foreign_server"):
+        if try_set_push_owner("datasource"):
             try:
                 with transaction.atomic():
-                    super(ForeignTable,self).delete(using)
-                try_push_to_repository('foreign_server')
+                    super(DataSource,self).delete(using)
+                try_push_to_repository('datasource')
             finally:
-                try_clear_push_owner("foreign_server")
+                try_clear_push_owner("datasource")
         else:
-            super(ForeignServer,self).delete(using)
+            super(DataSource,self).delete(using)
 
     def save(self, force_insert=False, force_update=False, using=None, update_fields=None):
         with transaction.atomic():
-            super(ForeignServer,self).save(force_insert,force_update,using,update_fields)
+            super(DataSource,self).save(force_insert,force_update,using,update_fields)
 
     def __str__(self):
-        return self.name
+        return self.name or ""
 
     class Meta:
         ordering = ['name']
 
-
-class ForeignServerEventListener(object):
+class DataSourceEventListener(object):
     """
-    Event listener for foreign table.
+    Event listener for DataSource.
 
     Encapsulated the event listener into a class is to resolve the issue "Exception TypeError: "'NoneType' object is not callable" in <function <lambda> at 0x7f45abef8aa0> ignored"
     """
     @staticmethod
-    @receiver(pre_save, sender=ForeignServer)
+    @receiver(pre_save, sender=DataSource)
     def _pre_save(sender, instance,**kwargs):
-        """
-        Bind a foreign table to the FDW database. Pre-save hook for ForeignTable.
-        """
+        if not instance.pk:
+            instance.new_object = True
+
         if not instance.save_signal_guard():
             return
         instance.execute()
 
     @staticmethod
-    @receiver(pre_delete, sender=ForeignServer)
+    @receiver(post_save, sender=DataSource)
+    def _post_save(sender, instance, **args):
+        if (hasattr(instance,"new_object") and getattr(instance,"new_object")):
+            delattr(instance,"new_object")
+            refresh_select_choices.send(instance,choice_family="datasource")
+
+    @staticmethod
+    @receiver(pre_delete, sender=DataSource)
     def _pre_delete(sender, instance, **args):
         # drop server and foreign tables.
         # testing table and server have been droped immediately after validation.
         cursor=create_engine(settings.FDW_URL).connect()
         instance.drop(cursor, "public",instance.name)
+
+    @staticmethod
+    @receiver(post_delete, sender=DataSource)
+    def _post_delete(sender, instance, **args):
+        refresh_select_choices.send(instance,choice_family="datasource")
+
 
 @python_2_unicode_compatible
 class ForeignTable(BorgModel,SignalEnable):
@@ -308,7 +342,7 @@ class ForeignTable(BorgModel,SignalEnable):
     In validation phase, use the name ("test_" + name) for testing
     """
     name = models.SlugField(max_length=255, unique=True, help_text="The name of foreign table", validators=[validate_slug])
-    server = models.ForeignKey(ForeignServer)
+    server = models.ForeignKey(DataSource,limit_choices_to={"type":DatasourceType.DATABASE})
     sql = SQLField(default="CREATE FOREIGN TABLE \"{{schema}}\".\"{{self.name}}\" () SERVER {{self.server.name}} OPTIONS (schema '<schema>', table '<table>');")
     last_modify_time = models.DateTimeField(auto_now=False,auto_now_add=True,editable=False,default=timezone.now,null=False)
 
@@ -345,7 +379,6 @@ class ForeignTable(BorgModel,SignalEnable):
     @in_schema(BorgConfiguration.TEST_SCHEMA, db_url=settings.FDW_URL)
     def clean(self, cursor,schema):
         #generate the testing name
-        self.sql = None if not self.sql else self.sql.strip()
         if not self.sql:
             raise ValidationError("Sql can't be empty.")
         #check whether sql is ascii string
@@ -356,7 +389,6 @@ class ForeignTable(BorgModel,SignalEnable):
 
         name = "test_" + self.name
         try:
-            #import ipdb; ipdb.set_trace()
             self.drop(cursor,schema,name)
             self.create(cursor,schema,name)
             #after validation, clear testing server and testing foreign table
@@ -432,7 +464,10 @@ class ForeignTableEventListener(object):
 
         if not instance.save_signal_guard():
             return
-        instance.execute()
+        try:
+            instance.execute()
+        except Exception as e:
+            raise ValidationError(e)
 
     @staticmethod
     @receiver(post_save, sender=ForeignTable)
@@ -454,44 +489,6 @@ class ForeignTableEventListener(object):
     def _post_delete(sender, instance, **args):
         refresh_select_choices.send(instance,choice_family="foreigntable")
 
-
-@python_2_unicode_compatible
-class DataSource(BorgModel,SignalEnable):
-    """
-    Represents a data source which the input is belonging to
-
-    """
-    name = models.SlugField(max_length=255, unique=True, help_text="The name of data source", validators=[validate_slug])
-    last_modify_time = models.DateTimeField(auto_now=False,auto_now_add=True,editable=False,default=timezone.now,null=False)
-
-    @in_schema(BorgConfiguration.TEST_SCHEMA, db_url=settings.FDW_URL)
-    def clean(self, cursor,schema):
-        #generate the testing name
-        self.last_modify_time = timezone.now()
-
-    def delete(self,using=None):
-        logger.info('Delete {0}:{1}'.format(type(self),self.name))
-        if try_set_push_owner("data_source"):
-            try:
-                with transaction.atomic():
-                    super(ForeignTable,self).delete(using)
-                try_push_to_repository('data_source')
-            finally:
-                try_clear_push_owner("data_source")
-        else:
-            super(DataSource,self).delete(using)
-
-    def save(self, force_insert=False, force_update=False, using=None, update_fields=None):
-        with transaction.atomic():
-            super(DataSource,self).save(force_insert,force_update,using,update_fields)
-
-    def __str__(self):
-        return self.name
-
-    class Meta:
-        ordering = ['name']
-
-@python_2_unicode_compatible
 class Input(JobFields,SignalEnable):
     """
     Represents an input table in the harvest DB. Also contains source info
@@ -501,13 +498,7 @@ class Input(JobFields,SignalEnable):
     data_source = models.ForeignKey(DataSource)
     foreign_table = models.ForeignKey(ForeignTable, null=True, blank=True, help_text="Foreign table to update VRT from")
     generate_rowid = models.BooleanField(null=False, default=False, help_text="If true, a _rowid column will be added and filled with row data's hash value")
-    source = DatasourceField(help_text="GDAL VRT definition in xml", default=(
-        '<OGRVRTDataSource>\n'
-        '    <OGRVRTLayer name="tablename">\n'
-        "        <SrcDataSource>PG:dbname=databasename host='addr' port='5432' user='x' password='y'</SrcDataSource>\n"
-        '    </OGRVRTLayer>\n'
-        '</OGRVRTDataSource>'
-    ), unique=True)
+    source = DatasourceField(help_text="GDAL VRT definition in xml", unique=True)
     advanced_options = models.CharField(max_length=128, null=True, editable=False,blank=True,help_text="Advanced ogr2ogr options")
     info = models.TextField(editable=False)
     spatial_type = models.IntegerField(default=1,editable=False)
@@ -525,6 +516,11 @@ class Input(JobFields,SignalEnable):
 {% endif %}{% if info_dict.attracc %}Attribute accuracy: {{ info_dict.attracc }}
 {% endif %}"""
 
+    _field_re = re.compile("[ \t]*(?P<type>[a-zA-Z0-9]+)[ \t]*(\([ \t]*(?P<width>[0-9]+)\.(?P<precision>[0-9]+)\))?[ \t]*")
+    _datasource_info_re = re.compile("[(\n)|(\r\n)](?P<key>[a-zA-Z0-9_\-][a-zA-Z0-9_\- ]*[a-zA-Z0-9_\-]?)[ \t]*:(?P<value>[^\r\n]*([(\r\n)|(\n)](([ \t]+[^\r\n]*)|(GEOGCS[^\r\n]*)))*)")
+
+    DB_TEMPLATE_CONTEXT = {'NAME':'{{db.NAME}}','HOST':'{{db.HOST}}',"PORT":'{{db.PORT}}','USER':'{{db.USER}}','PASSWORD':'{{db.PASSWORD}}'}
+
     @property
     def rowid_column(self):
         return BorgConfiguration.ROWID_COLUMN
@@ -538,8 +534,11 @@ class Input(JobFields,SignalEnable):
         If data source is a file, the value is the file path.
         If data source is foreign table, the value is the connection parameters
         """
-        if not self._datasource and self.source:
-            self._datasource = self._datasource_re.findall(self.source)
+        if self.source:
+            if not self._datasource:
+                self._datasource = self._datasource_re.findall(self.source)
+        else:
+            self._datasource = None
         return self._datasource
 
     _style_file = 'N/A'
@@ -574,7 +573,7 @@ class Input(JobFields,SignalEnable):
         """
         if hasattr(self, "_vrt"): return self._vrt
         self._vrt = tempfile.NamedTemporaryFile()
-        self._vrt.write(Template(self.source).render(Context({"self": self})))
+        self._vrt.write(Template(self.source).render(Context({"self": self,"db":settings.FDW_URL_SETTINGS})))
         self._vrt.flush()
         return self._vrt
 
@@ -803,29 +802,18 @@ class Input(JobFields,SignalEnable):
 
     @in_schema(BorgConfiguration.TEST_INPUT_SCHEMA + "," + BorgConfiguration.BORG_SCHEMA)
     def clean(self,cursor,schema):
-        self.source = None if not self.source else self.source.strip()
-        if not self.source:
-            raise ValidationError("Source can't be empty.")
-    
         if self.foreign_table:
             self.source = re.sub('(<OGRVRTLayer name=")[^"]+(">)', r'\1{}\2'.format(self.foreign_table.name), self.source)
-            self.source = re.sub('(<SrcDataSource>)[^<]+(</SrcDataSource>)', r"\1PG:dbname='{NAME}' host='{HOST}' user='{USER}' password='{PASSWORD}' port='{PORT}'\2".format(**parse(settings.FDW_URL)), self.source)
+            self.source = re.sub('(<SrcDataSource>)[^<]+(</SrcDataSource>)', r"\1PG:dbname='{{db.NAME}}' host='{{db.HOST}}' user='{{db.USER}}' password='{{db.PASSWORD}}' port='{{db.PORT}}'\2", self.source)
 
-        self.advanced_options = None if not self.advanced_options else self.advanced_options.strip() or None
+        self.source = Template(self.source).render(Context({"self": self,"db":Input.DB_TEMPLATE_CONTEXT}))
 
-        #check whether need to do validation.
-        orig = None
-        if self.pk:
-            orig = Input.objects.get(pk=self.pk)
+        self.advanced_options = self.advanced_options or None
 
-        if orig and orig.source == self.source and orig.generate_rowid == self.generate_rowid and self.advanced_options == orig.advanced_options:
-            #data source and generate_rowid not changed, no need to do the validation.
-            return
-        #import ipdb;ipdb.set_trace()
         self.last_modify_time = timezone.now()
 
         try:
-            self._set_info(cursor)
+            self._set_info()
             #automatically add a "<GeometryType>WkbNone</GeometryType>" if the data set is not a spatial data set
             if self.source.find("GeometryType") == -1 and self.source.find("GeometryField") == -1 and self.source.find("LayerSRS") == -1:
                 #data source does not contain any spatial related properties.
@@ -833,7 +821,7 @@ class Input(JobFields,SignalEnable):
                     #data source is not a spatial data set. try to insert a element <GeometryType>wkbNone</GeometryType>
                     self.source = self.source.replace("</SrcDataSource>","</SrcDataSource>\n        <GeometryType>wkbNone</GeometryType>")
                     if hasattr(self, "_vrt"): delattr(self,"_vrt")
-                    self._set_info(cursor)
+                    self._set_info()
 
             self.invoke(cursor,schema)
 
@@ -861,14 +849,135 @@ class Input(JobFields,SignalEnable):
             self._layer_name = output.replace("1: ", "").split(" (")[0].strip()
             return self._layer_name
 
+    def insert_fields(self):
+        origin_source = self.source
+        try:
+            root = None
+            #parse string to xml object
+            try:
+                root = ET.fromstring(self.source)
+            except:
+                raise ValidationError("Source is invalid xml.")
+            layer = list(root)[0]
+
+            #find the first non OGRVRTWarpedLayer layer
+            while layer.tag == "OGRVRTWarpedLayer":
+                layer = layer.find("OGRVRTLayer") or layer.find("OGRVRTUnionLayer") or layer.find("OGRVRTWarpedLayer")
+    
+        
+            union_layer = None
+            if layer.tag == "OGRVRTUnionLayer":
+                #currently only support union similiar layers which has same table structure, all fields will be configured in the first layer, 
+                union_layer = layer
+                layer = list(union_layer)[0]
+                while layer.tag == "OGRVRTWarpedLayer":
+                    layer = layer.find("OGRVRTLayer") or layer.find("OGRVRTUnionLayer") or layer.find("OGRVRTWarpedLayer")
+    
+                #currently,does not support union layer include another union layer .
+                if layer.tag == "OGRVRTUnionLayer":
+                    raise ValidationError("Does not support union layer includes another union layer.")
+    
+            field_childs = layer.findall("Field") or []
+    
+            #remove fields first
+            for f in field_childs:
+                layer.remove(f)
+    
+            if union_layer is not None:
+                #remove all fields from union layer
+                for f in union_layer.findall("Field") or []:
+                    union_layer.remove(f)
+                #remove all fields from included layers
+                for l in list(union_layer):
+                    while l.tag == "OGRVRTWarpedLayer":
+                        l = layer.find("OGRVRTLayer") or layer.find("OGRVRTUnionLayer") or layer.find("OGRVRTWarpedLayer")
+    
+                    #currently,does not support union layer include another union layer .
+                    if l.tag == "OGRVRTUnionLayer":
+                        raise ValidationError("Does not support union layer includes another union layer.")
+    
+                    for f in l.findall("Field") or []:
+                        l.remove(f)
+    
+                #remote field strategy from union layer
+                field_strategy = union_layer.find("FieldStrategy")
+                if field_strategy is not None:
+                    union_layer.remove(field_strategy)
+    
+                #add first layer strategy into union layer
+                field_strategy = ET.Element("FieldStrategy")
+                setattr(field_strategy,"text","FirstLayer")
+                union_layer.append(field_strategy)
+    
+            #assign the new source string to self.source to get datasource information
+            self.source = ET.tostring(root,"UTF-8")
+    
+            #get datasource information based on new source string
+            self._set_info()
+    
+            fields = []
+            
+            #using regrex to parse output into datasource items
+            datasource_items = self._datasource_info_re.findall(self.info)
+            #get all fields from datasource items
+            info_items = [(item[0],item[1]) for item in datasource_items]
+            for k,v in info_items:
+                if k in ("INFO","Layer name","Geometry","Metadata","Feature Count","Extent","Layer SRS WKT"):
+                    continue
+                if k.find(" ") >= 0:
+                    #include a emptry, can't be a column
+                    continue
+                m = self._field_re.search(v)
+                if m:
+                    #convert the column name to lower case
+                    fields.append((k.lower(),m.group('type'),m.group('width'),m.group('precision')))
+    
+            #convert the column name into lower case, 
+            for f in field_childs:
+                f.set('name',f.get('name').lower())
+            field_child_dict = dict(zip([f.get('name') for f in field_childs],field_childs))
+    
+            #readd all the fields, keep the cutomized fields and add the missing fields
+            element_attrs = {}
+            for f in fields:
+                if f[0] in field_child_dict:
+                    #customized field, keep it
+                    layer.append(field_child_dict[f[0]])
+                else:
+                    #missing field, populate it
+                    element_attrs['name'] = f[0]
+                    element_attrs['type'] = f[1]
+    
+                    if f[2] and f[2] != "0":
+                        element_attrs['width'] = f[2]
+                    elif 'width' in element_attrs:
+                        del element_attrs['width']
+    
+                    if f[3] and f[3] != "0":
+                        element_attrs['precision'] = f[3]
+                    elif 'precision' in element_attrs:
+                        del element_attrs['precision']
+    
+                    layer.append(ET.Element("Field",attrib=element_attrs))
+        
+            #convert xml to pretty string
+            self.source = ET.tostring(root,"UTF-8")
+            root = minidom.parseString(self.source)
+            self.source = root.toprettyxml(indent="    ")
+            self.source = "\n".join([line for line in self.source.splitlines() if line.strip()])
+        except Exception as e:
+            self.source = origin_source
+            logger.error(traceback.format_exc())
+            raise ValidationError(e)
+    
+
     _layer_name_re = re.compile('Layer name: [^\n]*\n')
-    def _set_info(self,cursor,database=None,table=None):
+    def _set_info(self,database=None,table=None):
         """
         set the data source's information dictionary
         if database is not None, read the information from table;
         if database is None, read the information from data source;
         """
-        #import ipdb;ipdb.set_trace()
         if database and table:
             cmd = ["ogrinfo", "-ro", "-so", database, table]
         else:
@@ -978,7 +1087,7 @@ class Input(JobFields,SignalEnable):
             else:
                 if output[1].strip() :
                     raise Exception(output[1])
-                self._set_info(cursor,database,table)
+                self._set_info(database,table)
 
         return not cancelled
 
@@ -1109,7 +1218,7 @@ class Transform(JobFields):
         raise NotImplementedError("Not implemented.")
 
     def __str__(self):
-        return self.name
+        return self.name or ""
 
     class Meta:
         abstract = True
@@ -1623,14 +1732,8 @@ class PublishChannel(BorgModel,SignalEnable):
             super(PublishChannel,self).delete(using)
 
     def clean(self):
-        orig = None
-        if self.pk:
-            orig = PublishChannel.objects.get(pk=self.pk)
-
-        if (not orig or
-            orig.sync_postgres_data != self.sync_postgres_data or
-            orig.sync_geoserver_data != self.sync_geoserver_data):
-            self.last_modify_time = timezone.now()
+        import ipdb;ipdb.set_trace()
+        self.last_modify_time = timezone.now()
 
 
     def save(self, force_insert=False, force_update=False, using=None, update_fields=None):
@@ -1989,7 +2092,6 @@ class Publish(Transform,ResourceStatusManagement,SignalEnable):
         """
         Check whether the publish function is correct, by creating in test schema
         """
-        self.sql = None if not self.sql else self.sql.strip()
         if not self.sql :
             raise ValidationError("Sql can't be empty.")
 
@@ -2027,11 +2129,7 @@ class Publish(Transform,ResourceStatusManagement,SignalEnable):
             #check the table is spatial or non spatial
             self.spatial_type = SpatialTable.get_instance(cursor,self.workspace.test_schema,self.table_name,True).spatial_type
 
-            orig = None
-            if self.pk:
-                orig = Publish.objects.get(pk=self.pk)
-
-            if orig and orig.status != self.status:
+            if self.pk and hasattr(self,"changed_fields")  and "status" in self.changed_fields:
                 #publish status changed.
                 if (not self.publish_status.publish_enabled) and (orig.publish_status.publish_enabled):
                     #from publish enabled to publish disabled.

@@ -3,7 +3,7 @@ from django import forms
 from tablemanager.models import Workspace
 from wmsmanager.models import WmsServer,WmsLayer
 from borg_utils.form_fields import GeoserverSettingForm,MetaTilingFactorField,GridSetField
-from borg_utils.form_fields import GroupedModelChoiceField
+from borg_utils.form_fields import GroupedModelChoiceField,BorgSelect
 
 class WmsServerForm(forms.ModelForm,GeoserverSettingForm):
     """
@@ -23,7 +23,7 @@ class WmsServerForm(forms.ModelForm,GeoserverSettingForm):
     read_timeout.key = "read_timeout"
 
 
-    workspace = GroupedModelChoiceField('publish_channel',queryset=Workspace.objects.all(),required=True,choice_family="workspace",choice_name="workspace_choices")
+    workspace = GroupedModelChoiceField('publish_channel',queryset=Workspace.objects.all(),required=True,choice_family="workspace",choice_name="workspace_choices",widget=BorgSelect())
 
     def __init__(self, *args, **kwargs):
         kwargs['initial']=kwargs.get('initial',{})
@@ -31,7 +31,8 @@ class WmsServerForm(forms.ModelForm,GeoserverSettingForm):
         super(WmsServerForm, self).__init__(*args, **kwargs)
         if 'instance' in kwargs and  kwargs['instance'] and kwargs['instance'].pk:
             self.fields['name'].widget.attrs['readonly'] = True
-            self.fields['workspace'] = forms.ModelChoiceField(queryset=Workspace.objects.filter(pk = kwargs["instance"].workspace.pk),required=True)
+
+            self.fields['workspace'].widget.attrs['readonly'] = True
 
     def _post_clean(self):
         if self.errors:
