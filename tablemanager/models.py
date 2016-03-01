@@ -197,7 +197,7 @@ class DataSource(BorgModel,SignalEnable):
     description = models.CharField(max_length=255, null=True,blank=True)
     user = models.CharField(max_length=320,null=True,blank=True)
     password = models.CharField(max_length=320,null=True,blank=True)
-    sql = SQLField(default="CREATE SERVER {{self.name}} FOREIGN DATA WRAPPER oracle_fdw OPTIONS (dbserver '//<hostname>/<sid>');",null=True,blank=True)
+    sql = SQLField(null=True,blank=True)
     vrt = XMLField(help_text="GDAL VRT template in xml", default="")
     last_modify_time = models.DateTimeField(auto_now=False,auto_now_add=True,editable=False,default=timezone.now,null=False)
 
