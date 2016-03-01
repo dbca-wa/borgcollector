@@ -4,7 +4,6 @@ import threading
 import logging
 
 from django.db import connection,transaction
-from reversion import VersionAdmin
 from django.core.urlresolvers import reverse
 from django.contrib import messages
 from django.http import HttpResponseRedirect
@@ -12,13 +11,13 @@ from django.utils.safestring import mark_safe
 from django.utils import timezone
 
 from tablemanager.models import (
-    ForeignServer,ForeignTable, Input, NormalTable,
+    ForeignTable, Input, NormalTable,
     Normalise, Workspace, Publish, Replica,
     Normalise_NormalTable,Style,
     PublishChannel,DataSource
 )
 from tablemanager.forms import (
-    NormaliseForm,NormalTablePublishForm,PublishForm,ForeignServerForm,ForeignTableForm,
+    NormaliseForm,PublishForm,ForeignTableForm,
     InputForm,NormalTableForm,WorkspaceForm,DataSourceForm,
     PublishChannelForm,StyleForm
 )
@@ -31,6 +30,7 @@ from borg_utils.spatial_table import SpatialTable
 from borg_utils.borg_config import BorgConfiguration
 from borg_utils.resource_status import ResourceStatus
 from borg_utils.hg_batch_push import try_set_push_owner, try_clear_push_owner, increase_committed_changes, try_push_to_repository
+from borg_utils.admin import BorgAdmin
 
 logger = logging.getLogger(__name__)
 
@@ -86,7 +86,7 @@ class JobFields(object):
     _job_message.allow_tags = True
     _job_message.short_description = "Job message"
 
-class PublishChannelAdmin(VersionAdmin):
+class PublishChannelAdmin(BorgAdmin):
     list_display = ("name", "sync_postgres_data","sync_geoserver_data","last_modify_time")
     readonly_fields = ("last_modify_time",)
     form = PublishChannelForm
@@ -142,8 +142,8 @@ class PublishChannelAdmin(VersionAdmin):
         return actions 
 
 
-class DataSourceAdmin(VersionAdmin):
-    list_display = ("name", "last_modify_time")
+class DataSourceAdmin(BorgAdmin):
+    list_display = ("name","type", "last_modify_time")
     search_fields = ["name"]
     form = DataSourceForm
 
@@ -198,7 +198,7 @@ class DataSourceAdmin(VersionAdmin):
         return actions 
 
 
-class WorkspaceAdmin(VersionAdmin):
+class WorkspaceAdmin(BorgAdmin):
     list_display = ("name","publish_channel","auth_level","_schema","_test_schema",)
     readonly_fields = ("_schema","_view_schema","_test_schema","_test_view_schema")
     #actions = [instantiate]
@@ -276,65 +276,7 @@ class WorkspaceAdmin(VersionAdmin):
         actions['delete_selected'] = (WorkspaceAdmin.custom_delete_selected,self.default_delete_action[1],self.default_delete_action[2])
         return actions 
 
-class ForeignServerAdmin(VersionAdmin):
-    list_display = ("name","last_modify_time")
-    readonly_fields = ("last_modify_time",)
-    #actions = [instantiate]
-    search_fields = ["name"]
-
-    form = ForeignServerForm
-
-    def custom_delete_selected(self,request,queryset):
-        if request.POST.get('post') != 'yes':
-            #the confirm page, or user not confirmed
-            return self.default_delete_action[0](self,request,queryset)
-    
-        #user confirm to delete the foreign_tablees, execute the custom delete logic.
-        result = None
-        failed_foreign_servers = []
-
-        try_set_push_owner("foreign_server_admin",enforce=True)
-        warning_message = None
-        try:
-            for foreign_server in queryset:
-                try:
-                    with transaction.atomic():
-                        foreign_server.delete()
-                except:
-                    error = sys.exc_info()
-                    failed_foreign_servers.append((foreign_table.name,traceback.format_exception_only(error[0],error[1])))
-                    #remove failed, continue to process the next foreign_table
-                    continue
-
-            try:
-                try_push_to_repository('foreign_server_admin',enforce=True)
-            except:
-                error = sys.exc_info()
-                warning_message = traceback.format_exception_only(error[0],error[1])
-                logger.error(traceback.format_exc())
-        finally:
-            try_clear_push_owner("foreign_server_admin",enforce=True)
-
-        if failed_foreign_servers or warning_message:
-            if failed_foreign_servers:
-                if warning_message:
-                    messages.warning(request, mark_safe("<ul><li>{0}</li><li>Some selected foreign servers are deleted failed:<ul>{1}</ul></li></ul>".format(warning_message,"".join(["<li>{0} : {1}</li>".format(o[0],o[1]) for o in failed_foreign_servers]))))
-                else:
-                    messages.warning(request, mark_safe("Some selected foreign servers are deleted failed:<ul>{0}</ul>".format("".join(["<li>{0} : {1}</li>".format(o[0],o[1]) for o in failed_foreign_servers]))))
-            else:
-                messages.warning(request, mark_safe(warning_message))
-        else:
-            messages.success(request, "All selected foreign servers are deleted successfully")
-
-    def get_actions(self, request):
-        #import ipdb;ipdb.set_trace()
-        actions = super(ForeignServerAdmin, self).get_actions(request)
-        self.default_delete_action = actions['delete_selected']
-        del actions['delete_selected']
-        actions['delete_selected'] = (ForeignServerAdmin.custom_delete_selected,self.default_delete_action[1],self.default_delete_action[2])
-        return actions 
-
-class ForeignTableAdmin(VersionAdmin):
+class ForeignTableAdmin(BorgAdmin):
     list_display = ("name","last_modify_time")
     readonly_fields = ("last_modify_time",)
     #actions = [instantiate]
@@ -397,7 +339,7 @@ def _up_to_date(o):
 _up_to_date.short_description = "Up to date"
 _up_to_date.boolean = True
 
-class NormalTableAdmin(VersionAdmin):
+class NormalTableAdmin(BorgAdmin):
     list_display = ("name","_normalise","last_modify_time",_up_to_date)
     #actions = [instantiate]
     readonly_fields = ("_normalise","last_modify_time",_up_to_date)
@@ -462,7 +404,7 @@ class NormalTableAdmin(VersionAdmin):
         actions['delete_selected'] = (NormalTableAdmin.custom_delete_selected,self.default_delete_action[1],self.default_delete_action[2])
         return actions 
 
-class InputAdmin(VersionAdmin,JobFields):
+class InputAdmin(BorgAdmin,JobFields):
     list_display = ("name","data_source", "geometry", "extent", "count","last_modify_time",_up_to_date,"_job_id", "_job_batch_id", "_job_status")
     readonly_fields = ("spatial_type_desc","_style_file","title","abstract","_create_table_sql","ds_modify_time","last_modify_time",_up_to_date,"_job_batch_id","_job_id","_job_status","_job_message")
     search_fields = ["name","data_source__name"]
@@ -539,7 +481,7 @@ class InputAdmin(VersionAdmin,JobFields):
         actions['delete_selected'] = (InputAdmin.custom_delete_selected,self.default_delete_action[1],self.default_delete_action[2])
         return actions 
 
-class NormaliseAdmin(VersionAdmin,JobFields):
+class NormaliseAdmin(BorgAdmin,JobFields):
     list_display = ("name","output_table","last_modify_time",_up_to_date,"_job_id", "_job_batch_id","_job_status")
     readonly_fields = ("last_modify_time",_up_to_date,"_job_batch_id","_job_id","_job_status","_job_message")
     search_fields = ["__name"]
@@ -596,22 +538,14 @@ class NormaliseAdmin(VersionAdmin,JobFields):
         actions['delete_selected'] = (NormaliseAdmin.custom_delete_selected,self.default_delete_action[1],self.default_delete_action[2])
         return actions 
 
-class PublishAdmin(VersionAdmin,JobFields):
+class PublishAdmin(BorgAdmin,JobFields):
     list_display = ("name","workspace","spatial_type_desc","_default_style","interval","_enabled","_publish_content","_job_id", "_job_batch_id", "_job_status","waiting","running","completed","failed")
     readonly_fields = ("_default_style","applications","_create_table_sql","spatial_type_desc","last_modify_time","_publish_content","_job_batch_id","_job_id","_job_status","_job_message","waiting","running","completed","failed")
     search_fields = ["name","status","workspace__name"]
 
-    #form = PublishForm
+    form = PublishForm
 
     _geoserver_setting_fields = [f[0] for f in PublishForm.base_fields.items() if hasattr(f[1],"setting_type") and f[1].setting_type == "geoserver_setting"]
-
-    def get_form(self, request, obj=None, **kwargs):
-        # Proper kwargs are form, fields, exclude, formfield_callback
-        if obj and SpatialTable.check_normal(obj.spatial_type):
-            return NormalTablePublishForm
-        else:
-            return PublishForm
-        
 
     def _enabled(self,o):
         return o.status == ResourceStatus.Enabled.name
@@ -863,7 +797,7 @@ class PublishAdmin(VersionAdmin,JobFields):
         actions['delete_selected'] = (PublishAdmin.custom_delete_selected,self.default_delete_action[1],self.default_delete_action[2])
         return actions 
 
-class StyleAdmin(VersionAdmin):
+class StyleAdmin(BorgAdmin):
     list_display = ("id","publish","name","_default_style","_enabled","last_modify_time")
     search_fields = ["name","status","publish__name"]
 
@@ -954,7 +888,6 @@ class StyleAdmin(VersionAdmin):
     actions = ['enable_style','set_default_style','disable_style']
     
 site.register(Workspace, WorkspaceAdmin)
-site.register(ForeignServer, ForeignServerAdmin)
 site.register(ForeignTable, ForeignTableAdmin)
 site.register(Input, InputAdmin)
 site.register(Publish, PublishAdmin)
