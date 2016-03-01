@@ -22,6 +22,16 @@ SECRET_KEY = os.environ.get('SECRET_KEY', '')
 FDW_URL = os.environ.get('FDW_URL', '')
 DEBUG = os.environ.get('DEBUG', False)
 TEMPLATE_DEBUG = DEBUG
+FDW_URL_SETTINGS = None
+if FDW_URL:
+    FDW_URL_SETTINGS = dj_database_url.parse(FDW_URL)
+    if 'PORT' not in FDW_URL_SETTINGS: FDW_URL_SETTINGS['PORT'] = 5432
+    if 'USER' not in FDW_URL_SETTINGS: FDW_URL_SETTINGS['USER'] = ""
+    if 'PASSWORD' not in FDW_URL_SETTINGS: FDW_URL_SETTINGS['PASSWORD'] = ""
+else:
+    FDW_URL_SETTINGS = {}
+
+
 
 from django.conf.global_settings import TEMPLATE_CONTEXT_PROCESSORS as TCP
 

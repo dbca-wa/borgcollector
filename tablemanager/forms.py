@@ -1,32 +1,20 @@
 import json
+from itertools import ifilter
+
 from django import forms
 from django.core.exceptions import ObjectDoesNotExist,ValidationError
 from django.forms.widgets import HiddenInput,TextInput
+from django.contrib.admin.widgets import RelatedFieldWidgetWrapper
 
 from tablemanager.models import (Normalise,NormalTable,Normalise_NormalTable,Publish,
-        Publish_NormalTable,ForeignTable,Input,NormalTable,Workspace,ForeignServer,DataSource,
-        PublishChannel,Style)
-from borg_utils.form_fields import GroupedModelChoiceField
+        Publish_NormalTable,ForeignTable,Input,NormalTable,Workspace,DataSource,
+        PublishChannel,Style,DatasourceType)
+from borg_utils.form_fields import GroupedModelChoiceField,CachedModelChoiceField
 from borg_utils.widgets import MultiWidgetLayout
-from borg_utils.form_fields import GeoserverSettingForm,MetaTilingFactorField,GridSetField
+from borg_utils.form_fields import GeoserverSettingForm,MetaTilingFactorField,GridSetField,BorgSelect
 from borg_utils.forms import BorgModelForm
-
-class ForeignServerForm(BorgModelForm):
-    """
-    A form for ForeignServer Model
-    """
-    def __init__(self, *args, **kwargs):
-        super(ForeignServerForm, self).__init__(*args, **kwargs)
-        if 'instance' in kwargs and  kwargs['instance'] and kwargs['instance'].pk:
-            self.fields['name'].widget.attrs['readonly'] = True
-
-    def save(self, commit=True):
-        self.instance.enable_save_signal()
-        return super(ForeignServerForm, self).save(commit)
-
-    class Meta:
-        model = ForeignServer
-        fields = "__all__"
+from borg_utils.spatial_table import SpatialTable
+from django.template import Context, Template
 
 class ForeignTableForm(BorgModelForm):
     """
@@ -34,8 +22,14 @@ class ForeignTableForm(BorgModelForm):
     """
     def __init__(self, *args, **kwargs):
         super(ForeignTableForm, self).__init__(*args, **kwargs)
+        #remove the empty label
+        #self.fields['server'].empty_label=None
+
         if 'instance' in kwargs and  kwargs['instance'] and kwargs['instance'].pk:
             self.fields['name'].widget.attrs['readonly'] = True
+            #remote the "+" icon from html page because this field is readonly
+            self.fields['server'].widget = self.fields['server'].widget.widget
+            self.fields['server'].widget.attrs['readonly'] = True
 
     def save(self, commit=True):
         self.instance.enable_save_signal()
@@ -44,28 +38,108 @@ class ForeignTableForm(BorgModelForm):
     class Meta:
         model = ForeignTable
         fields = "__all__"
+        widgets = {
+                'server': BorgSelect(),
+        }
 
 class DataSourceForm(BorgModelForm):
     """
     A form for DataSource Model
     """
+    def __init__(self, *args, **kwargs):
+        super(DataSourceForm, self).__init__(*args, **kwargs)
+
+        if 'instance' in kwargs and  kwargs['instance'] and kwargs['instance'].pk:
+            self.fields['name'].widget.attrs['readonly'] = True
+            self.fields['type'].widget.attrs['readonly'] = True
+
     def save(self, commit=True):
         self.instance.enable_save_signal()
         return super(DataSourceForm, self).save(commit)
 
+    @classmethod
+    def get_fields(cls,obj=None):
+        if obj and obj.type == DatasourceType.DATABASE:
+            return ["name","type","description","user","password","sql","vrt"]
+        else:
+            return ["name","type","description","vrt"]
+
+
     class Meta:
         model = DataSource
         fields = "__all__"
+        widgets = {
+                'type': BorgSelect(attrs={"onChange":"$('#datasource_form').submit()"}),
+                'description': forms.TextInput(attrs={"style":"width:95%"})
+        }
 
 class InputForm(BorgModelForm):
     """
     A form for Input Model
     """
-    foreign_table = GroupedModelChoiceField('server',queryset=ForeignTable.objects.all(),required=False,choice_family="foreigntable",choice_name="foreigntable_options")
+    INSERT_FIELDS = 100
+    CHANGE_DATA_SOURCE = 101
+    CHANGE_FOREIGN_TABLE = 102
+
+    foreign_table = CachedModelChoiceField(queryset=ForeignTable.objects.all(),label_func=lambda table:table.name,required=False,choice_family="foreigntable",choice_name="foreigntable_options", 
+            widget=BorgSelect(attrs={"onChange":"$('#input_form').append(\"<input type='hidden' name='_change_foreign_table' value=''>\"); $('#input_form').submit()"}))
     def __init__(self, *args, **kwargs):
         super(InputForm, self).__init__(*args, **kwargs)
         if 'instance' in kwargs and  kwargs['instance'] and kwargs['instance'].pk:
             self.fields['name'].widget.attrs['readonly'] = True
+
+            #remote the "+" icon from html page because this field is readonly
+            self.fields['data_source'].widget = self.fields['data_source'].widget.widget
+            self.fields['data_source'].widget.attrs['readonly'] = True
+            #remote the "+" icon from html page because this field is readonly
+            self.fields['foreign_table'].widget.attrs['readonly'] = True
+
+    def get_mode(self,data):
+        if data and "_insert_fields" in data:
+            return (InputForm.INSERT_FIELDS,"insert_fields",True,False,None)
+        elif data and "_change_data_source" in data:
+            return (InputForm.CHANGE_DATA_SOURCE,"change_data_source",True,False,('name','data_source'))
+        elif data and "_change_foreign_table" in data:
+            return (InputForm.CHANGE_DATA_SOURCE,"change_foreign_table",True,False,('name','data_source','foreign_table'))
+
+        return super(InputForm,self).get_mode(data)
+
+    def get_fields(self,obj=None):
+        if obj and hasattr(obj,"data_source"):
+            if obj.data_source.type == DatasourceType.DATABASE:
+                if hasattr(obj,"foreign_table"):
+                    return ["name","data_source","foreign_table","generate_rowid","source"]
+                else:
+                    return ["name","data_source","foreign_table"]
+            else:
+                return ["name","data_source","generate_rowid","source"]
+        else:
+            return ["name","data_source"]
+
+    def insert_fields(self):
+        self.data['source'] = self.instance.source
+        self.fields['foreign_table'].queryset = ForeignTable.objects.filter(server=self.instance.data_source)
+        self.fields['foreign_table'].choice_name = "foreigntable_options_{}".format(self.instance.data_source.name)
+        self.fields['foreign_table'].widget.choices = self.fields['foreign_table'].choices
+
+    def change_data_source(self):
+        if not hasattr(self.instance,"data_source"):
+            self.data['source'] = ""
+        elif self.instance.data_source.type == DatasourceType.FILE_SYSTEM:
+            self.data['source'] = self.instance.data_source.vrt
+        elif self.instance.data_source.type == DatasourceType.DATABASE:
+            self.fields['foreign_table'].queryset = ForeignTable.objects.filter(server=self.instance.data_source)
+            self.fields['foreign_table'].choice_name = "foreigntable_options_{}".format(self.instance.data_source.name)
+            self.fields['foreign_table'].widget.choices = self.fields['foreign_table'].choices
+            self.data['source'] = ""
+        else:
+            self.data['source'] = ""
+
+    def change_foreign_table(self):
+        self.data['source'] = str(Template(self.instance.data_source.vrt).render(Context({'self':self.instance,'db':Input.DB_TEMPLATE_CONTEXT})))
+        self.fields['foreign_table'].queryset = ForeignTable.objects.filter(server=self.instance.data_source)
+        self.fields['foreign_table'].choice_name = "foreigntable_options_{}".format(self.instance.data_source.name)
+        self.fields['foreign_table'].widget.choices = self.fields['foreign_table'].choices
 
     def save(self, commit=True):
         self.instance.enable_save_signal()
@@ -74,6 +148,9 @@ class InputForm(BorgModelForm):
     class Meta:
         model = Input
         fields = "__all__"
+        widgets = {
+                'data_source': BorgSelect(attrs={"onChange":"$('#input_form').append(\"<input type='hidden' name='_change_data_source' value=''>\"); $('#input_form').submit()"}),
+        }
 
 class NormalTableForm(BorgModelForm):
     """
@@ -118,6 +195,9 @@ class WorkspaceForm(BorgModelForm):
         if 'instance' in kwargs and  kwargs['instance'] and kwargs['instance'].pk:
             self.fields['name'].widget.attrs['readonly'] = True
 
+            self.fields['publish_channel'].widget = self.fields['publish_channel'].widget.widget
+            self.fields['publish_channel'].widget.attrs['readonly'] = True
+
     def save(self, commit=True):
         self.instance.enable_save_signal()
         return super(WorkspaceForm, self).save(commit)
@@ -125,6 +205,9 @@ class WorkspaceForm(BorgModelForm):
     class Meta:
         model = Workspace
         fields = "__all__"
+        widgets = {
+                'publish_channel': BorgSelect(),
+        }
 
 class NormaliseForm(BorgModelForm):
     """
@@ -132,7 +215,7 @@ class NormaliseForm(BorgModelForm):
     """
     input_table = GroupedModelChoiceField('data_source',queryset=Input.objects.all(),required=True,choice_family="input",choice_name="input_options")
     dependents = forms.ModelMultipleChoiceField(queryset=NormalTable.objects.all(),required=False)
-    output_table = forms.ModelChoiceField(queryset=NormalTable.objects.all(),required=False)
+    output_table = forms.ModelChoiceField(queryset=NormalTable.objects.all(),required=False,widget=BorgSelect())
 
     def __init__(self, *args, **kwargs):
         kwargs['initial']=kwargs.get('initial',{})
@@ -148,9 +231,11 @@ class NormaliseForm(BorgModelForm):
                         if normal_table: dependents.append(normal_table)
 
             kwargs['initial']['dependents'] = dependents
+
         super(NormaliseForm, self).__init__(*args, **kwargs)
         if 'instance' in kwargs and  kwargs['instance'] and kwargs['instance'].pk:
             self.fields['name'].widget.attrs['readonly'] = True
+            self.fields['output_table'].widget.attrs['readonly'] = True
 
     def _post_clean(self):
         super(NormaliseForm,self)._post_clean()
@@ -187,16 +272,27 @@ class NormaliseForm(BorgModelForm):
         model = Normalise
         fields = ('name','input_table','dependents','output_table','sql')
 
-class NormalTablePublishForm(BorgModelForm):
+class PublishForm(BorgModelForm,GeoserverSettingForm):
     """
     A form for normal table's Publish Model
     """
-    workspace = GroupedModelChoiceField('publish_channel',queryset=Workspace.objects.all(),required=True,choice_family="workspace",choice_name="workspace_choices")
+    create_cache_layer = forms.BooleanField(required=False,label="create_cache_layer",initial=True)
+    create_cache_layer.setting_type = "geoserver_setting"
+
+    server_cache_expire = forms.IntegerField(label="server_cache_expire",min_value=0,required=False,initial=0,help_text="Expire server cache after n seconds (set to 0 to use source setting)")
+    server_cache_expire.setting_type = "geoserver_setting"
+
+    client_cache_expire = forms.IntegerField(label="client_cache_expire",min_value=0,required=False,initial=0,help_text="Expire client cache after n seconds (set to 0 to use source setting)")
+    client_cache_expire.setting_type = "geoserver_setting"
+
+    workspace = GroupedModelChoiceField('publish_channel',queryset=Workspace.objects.all(),required=True,choice_family="workspace",choice_name="workspace_choices",widget=BorgSelect())
     input_table = GroupedModelChoiceField('data_source',queryset=Input.objects.all(),required=False,choice_family="input",choice_name="input_options")
     dependents = forms.ModelMultipleChoiceField(queryset=NormalTable.objects.all(),required=False)
 
     def __init__(self, *args, **kwargs):
         kwargs['initial']=kwargs.get('initial',{})
+        self.get_setting_from_model(*args,**kwargs)
+
         if 'instance' in kwargs and  kwargs['instance']:
             #populate the dependents field value from table data
             dependents = []
@@ -207,13 +303,20 @@ class NormalTablePublishForm(BorgModelForm):
 
             kwargs['initial']['dependents'] = dependents
 
-        super(NormalTablePublishForm, self).__init__(*args, **kwargs)
+        super(PublishForm, self).__init__(*args, **kwargs)
         if 'instance' in kwargs and  kwargs['instance'] and kwargs['instance'].pk:
             self.fields['name'].widget.attrs['readonly'] = True
-            self.fields['workspace'] = forms.ModelChoiceField(queryset=Workspace.objects.filter(pk=kwargs['instance'].workspace.pk))
+            self.fields['workspace'].widget.attrs['readonly'] = True
+
+    @classmethod
+    def get_fields(cls,obj=None):
+        if obj and SpatialTable.check_normal(obj.spatial_type):
+            return ('name','workspace','interval','status','input_table','dependents','priority','sql','create_extra_index_sql')
+        else:
+            return ('name','workspace','interval','status','input_table','dependents','priority','kmi_title','kmi_abstract','sql','create_extra_index_sql',"create_cache_layer","server_cache_expire","client_cache_expire")
 
     def _post_clean(self):
-        super(NormalTablePublishForm,self)._post_clean()
+        super(PublishForm,self)._post_clean()
         if self.errors:
             return
 
@@ -234,40 +337,9 @@ class NormalTablePublishForm(BorgModelForm):
                 relation.set_normal_table(normal_table_pos, sorted_dependents[pos] if pos < length else None)
                 pos += 1
                 normal_table_pos += 1
-
-    def save(self, commit=True):
-        self.instance.enable_save_signal()
-        return super(NormalTablePublishForm, self).save(commit)
-
-    class Meta:
-        model = Publish
-        fields = ('name','workspace','interval','status','input_table','dependents','priority','sql','create_extra_index_sql')
-
-class PublishForm(NormalTablePublishForm,GeoserverSettingForm):
-    """
-    A form for spatial table's Publish Model
-    """
-    create_cache_layer = forms.BooleanField(required=False,label="create_cache_layer",initial=True)
-    create_cache_layer.setting_type = "geoserver_setting"
-
-    server_cache_expire = forms.IntegerField(label="server_cache_expire",min_value=0,required=False,initial=0,help_text="Expire server cache after n seconds (set to 0 to use source setting)")
-    server_cache_expire.setting_type = "geoserver_setting"
-
-    client_cache_expire = forms.IntegerField(label="client_cache_expire",min_value=0,required=False,initial=0,help_text="Expire client cache after n seconds (set to 0 to use source setting)")
-    client_cache_expire.setting_type = "geoserver_setting"
-
-    def __init__(self, *args, **kwargs):
-        kwargs['initial']=kwargs.get('initial',{})
-        self.get_setting_from_model(*args,**kwargs)
-
-        super(PublishForm, self).__init__(*args, **kwargs)
-
-    def _post_clean(self):
-        super(PublishForm,self)._post_clean()
-        if self.errors:
-            return
-
-        self.set_setting_to_model()
+    
+        if self.instance and SpatialTable.check_spatial(self.instance.spatial_type):
+            self.set_setting_to_model()
 
     def save(self, commit=True):
         self.instance.enable_save_signal()
@@ -297,7 +369,10 @@ class StyleForm(BorgModelForm):
         builtin_style = False
         if instance and instance.pk:
             self.fields['name'].widget.attrs['readonly'] = True
-            self.fields['publish'] = forms.ModelChoiceField(queryset=Publish.objects.filter(pk=kwargs['instance'].publish.pk))
+
+            self.fields['publish'].widget = self.fields['publish'].widget.widget
+            self.fields['publish'].widget.attrs['readonly'] = True
+
             builtin_style = instance.name == "builtin"
             if builtin_style:
                 self.fields['description'].widget.attrs['readonly'] = True
@@ -320,6 +395,7 @@ class StyleForm(BorgModelForm):
         model = Style
         fields = ('name','publish','description','status','default_style','sld')
         widgets = {
+                "publish": BorgSelect(),
                 "description": forms.TextInput(attrs={"style":"width:95%"})
         }
 
