@@ -16,7 +16,7 @@ harvest.short_description = "Harvest and update selected outputs"
 class JobAdmin(admin.ModelAdmin):
     readonly_fields = ("id","batch_id","_publish","job_type", "state","job_action" ,"previous_state", "_message","retry_times","last_execution_end_time", "created", "launched", "finished","sync_status","job_logs")
     list_display = ("id","batch_id", "_publish","job_type", "state", "created", "launched", "finished","job_action","sync_status","job_logs")
-    search_fields = ["publish__name","batch_id"]
+    search_fields = ["publish__name","batch_id","id"]
     actions = None
 
     def _message(self,o):
@@ -135,11 +135,12 @@ class JobLogAdmin(admin.ModelAdmin):
 
     def _job(self,o):
         if o.job:
-            return o.job.pk
+            return "<a href='/harvest/job/{}/'>{}</a>".format(o.job.pk,o.job.pk)
         else:
             return ''
     _job.short_description = "Job"
     _job.admin_order_field = "job__pk"
+    _job.allow_tags = True
 
     def has_add_permission(self,request):
         return False
