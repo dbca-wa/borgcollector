@@ -46,12 +46,25 @@ class DataSourceForm(BorgModelForm):
     """
     A form for DataSource Model
     """
+    CHANGE_TYPE = 100
     def __init__(self, *args, **kwargs):
         super(DataSourceForm, self).__init__(*args, **kwargs)
 
         if 'instance' in kwargs and  kwargs['instance'] and kwargs['instance'].pk:
             self.fields['name'].widget.attrs['readonly'] = True
             self.fields['type'].widget.attrs['readonly'] = True
+
+    def get_mode(self,data):
+        if data and "_change_type" in data:
+            return (DataSourceForm.CHANGE_TYPE,"change_type",True,False,('name','type'))
+
+        return super(DataSourceForm,self).get_mode(data)
+
+    def change_type(self):
+        if self.instance.type == DatasourceType.DATABASE:
+            self.data['sql'] = "CREATE SERVER {{self.name}} FOREIGN DATA WRAPPER oracle_fdw OPTIONS (dbserver '//<hostname>/<sid>');"
+        else:
+            self.data['sql'] = ""
 
     def save(self, commit=True):
         self.instance.enable_save_signal()
@@ -69,7 +82,7 @@ class DataSourceForm(BorgModelForm):
         model = DataSource
         fields = "__all__"
         widgets = {
-                'type': BorgSelect(attrs={"onChange":"$('#datasource_form').submit()"}),
+                'type': BorgSelect(attrs={"onChange":"$('#datasource_form').append(\"<input type='hidden' name='_change_type' value=''>\");$('#datasource_form').submit()"}),
                 'description': forms.TextInput(attrs={"style":"width:95%"})
         }
 
