@@ -518,16 +518,16 @@ class DumpFullData(HarvestState):
         cursor=connection.cursor()
         if not previous_state.is_error_state:
             #table with same name maybe published by previous job. drop it if have.
-            cursor.execute('drop table if exists {0}.{1} cascade'.format(job.publish.workspace.publish_data_schema,job.publish.table_name))
+            cursor.execute('drop table if exists "{0}"."{1}" cascade'.format(job.publish.workspace.publish_data_schema,job.publish.table_name))
         #move table to publish schema for dump
-        cursor.execute('alter table {0}.{1} set schema {2}'.format(job.publish.workspace.schema,job.publish.table_name,job.publish.workspace.publish_data_schema))
+        cursor.execute('alter table "{0}"."{1}" set schema {2}'.format(job.publish.workspace.schema,job.publish.table_name,job.publish.workspace.publish_data_schema))
         try:
             #import ipdb;ipdb.set_trace()
             output = subprocess.Popen(cmd,stdout=subprocess.PIPE,stderr=subprocess.PIPE, env=self.env).communicate()
             logger.debug("execute ({0})\nstdin:{1}\nstdout:{2}".format(cmd,output[0],output[1]))
         finally:
             #move table back to original schema
-            cursor.execute('alter table {0}.{1} set schema {2}'.format(job.publish.workspace.publish_data_schema,job.publish.table_name,job.publish.workspace.schema))
+            cursor.execute('alter table "{0}"."{1}" set schema "{2}"'.format(job.publish.workspace.publish_data_schema,job.publish.table_name,job.publish.workspace.schema))
 
         if output[1].strip() :
             return (HarvestStateOutcome.failed,output[1])
