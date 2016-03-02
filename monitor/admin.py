@@ -34,11 +34,19 @@ class SlaveServerAdmin(admin.ModelAdmin):
 
 
 class PublishSyncStatusAdmin(admin.ModelAdmin):
-    readonly_fields = ("id","slave_server","publish","spatial_type","sync_job_id","sync_job_batch_id","sync_time","_sync_message","deploied_job_id","deploied_job_batch_id","deploy_time","_deploy_message")
-    list_display = ("_status","id","slave_server","publish","spatial_type","deploied_job_id","deploy_time","sync_job_id","sync_time","_preview_file")
+    readonly_fields = ("id","slave_server","_publish","spatial_type","sync_job_id","sync_job_batch_id","sync_time","_sync_message","deploied_job_id","deploied_job_batch_id","deploy_time","_deploy_message")
+    list_display = ("_status","id","slave_server","_publish","spatial_type","deploied_job_id","deploy_time","sync_job_id","sync_time","_preview_file")
     search_fields = ("slave_server__name","publish","deploied_job_id","sync_job_id")
     list_display_links = ("id",)
     list_filter = ("slave_server",)
+
+    def _publish(self,o):
+        if o.publish:
+            return "<a href='/tablemanager/publish/?q={0}'>{0}</a>".format(o.publish)
+        else:
+            return ""
+    _publish.allow_tags = True
+    _publish.short_description = "Publish"
 
     def _deploy_message(self,o):
         if o.deploy_message:
@@ -78,10 +86,29 @@ class PublishSyncStatusAdmin(admin.ModelAdmin):
 
 
 class TaskSyncStatusAdmin(admin.ModelAdmin):
-    list_display = ("id","slave_server","task_type","task_name","action","sync_succeed","sync_time")
-    readonly_fields = ("id","slave_server","task_type","task_name","action","sync_succeed","sync_time","_sync_message")
+    list_display = ("id","slave_server","task_type","_task_name","action","sync_succeed","sync_time")
+    readonly_fields = ("id","slave_server","task_type","_task_name","action","sync_succeed","sync_time","_sync_message")
     search_fields = ("slave_server__name","task_type","task_name")
     list_filter = ("slave_server",)
+
+
+    def _task_name(self,o):
+        if o.task_name:
+            if o.task_type == "feature":
+                return "<a href='/tablemanager/publish/?q={1}'>{0}:{1}</a>".format(*o.task_name.split(':'))
+            elif o.task_type == "wms store":
+                return "<a href='/wmsmanager/wmsserver/?q={1}'>{0}:{1}</a>".format(*o.task_name.split(':'))
+            elif o.task_type == "wms layer":
+                return "<a href='/wmsmanager/interestedwmslayer/?q={1}'>{0}:{1}</a>".format(*o.task_name.split(':'))
+            elif o.task_type == "layergroup":
+                return "<a href='/layergroup/layergroup/?q={1}'>{0}:{1}</a>".format(*o.task_name.split(':'))
+            else:
+                return o.task_name
+        else:
+            return ""
+
+    _task_name.allow_tags = True
+    _task_name.short_description = "Task name"
 
     def _sync_message(self,o):
         if o.sync_message:
