@@ -277,7 +277,7 @@ class WorkspaceAdmin(BorgAdmin):
         return actions 
 
 class ForeignTableAdmin(BorgAdmin):
-    list_display = ("name","last_modify_time")
+    list_display = ("name","server","last_modify_time")
     readonly_fields = ("last_modify_time",)
     #actions = [instantiate]
     search_fields = ["name"]
