@@ -199,12 +199,18 @@ class DataSourceAdmin(BorgAdmin):
 
 
 class WorkspaceAdmin(BorgAdmin):
-    list_display = ("name","publish_channel","auth_level","_schema","_test_schema",)
+    list_display = ("name","_publish_channel","auth_level","_schema","_test_schema",)
     readonly_fields = ("_schema","_view_schema","_test_schema","_test_view_schema")
     #actions = [instantiate]
     search_fields = ["name"]
 
     form = WorkspaceForm
+
+    def _publish_channel(self,o):
+        return "<a href='/tablemanager/publishchannel/{0}/'>{1}</a>".format(o.publish_channel.pk,o.publish_channel)
+
+    _publish_channel.allow_tags = True
+    _publish_channel.short_description = "Publish channel"
 
     def _schema(self,o): 
         return o.schema
@@ -277,12 +283,18 @@ class WorkspaceAdmin(BorgAdmin):
         return actions 
 
 class ForeignTableAdmin(BorgAdmin):
-    list_display = ("name","server","last_modify_time")
+    list_display = ("name","_server","last_modify_time")
     readonly_fields = ("last_modify_time",)
     #actions = [instantiate]
     search_fields = ["name"]
 
     form = ForeignTableForm
+
+    def _server(self,o):
+        return "<a href='/tablemanager/datasource/{0}/'>{1}</a>".format(o.server.pk,o.server.name)
+
+    _server.allow_tags = True
+    _server.short_description = "Server"
 
     def custom_delete_selected(self,request,queryset):
         if request.POST.get('post') != 'yes':
@@ -349,9 +361,10 @@ class NormalTableAdmin(BorgAdmin):
 
     def _normalise(self,o):
         if o.normalise:
-            return o.normalise.name
+            return "<a href='/tablemanager/normalise/{0}/'>{1}</a>".format(o.normalise.pk,o.normalise)
         else:
             return ""
+    _normalise.allow_tags = True
     _normalise.short_description = "Normalise"
 
     def custom_delete_selected(self,request,queryset):
@@ -405,11 +418,17 @@ class NormalTableAdmin(BorgAdmin):
         return actions 
 
 class InputAdmin(BorgAdmin,JobFields):
-    list_display = ("name","data_source", "geometry", "extent", "count","last_modify_time",_up_to_date,"_job_id", "_job_batch_id", "_job_status")
+    list_display = ("name","_data_source", "geometry", "extent", "count","last_modify_time",_up_to_date,"_job_id", "_job_batch_id", "_job_status")
     readonly_fields = ("spatial_type_desc","_style_file","title","abstract","_create_table_sql","ds_modify_time","last_modify_time",_up_to_date,"_job_batch_id","_job_id","_job_status","_job_message")
     search_fields = ["name","data_source__name"]
 
     form = InputForm
+
+    def _data_source(self,o):
+        return "<a href='/tablemanager/datasource/{0}/'>{1}</a>".format(o.data_source.pk,o.data_source)
+
+    _data_source.allow_tags = True
+    _data_source.short_description = "Datasource"
 
     def spatial_type_desc(self,o):
         return SpatialTable.get_spatial_type_desc(o.spatial_type)
@@ -482,11 +501,17 @@ class InputAdmin(BorgAdmin,JobFields):
         return actions 
 
 class NormaliseAdmin(BorgAdmin,JobFields):
-    list_display = ("name","output_table","last_modify_time",_up_to_date,"_job_id", "_job_batch_id","_job_status")
+    list_display = ("name","_output_table","last_modify_time",_up_to_date,"_job_id", "_job_batch_id","_job_status")
     readonly_fields = ("last_modify_time",_up_to_date,"_job_batch_id","_job_id","_job_status","_job_message")
     search_fields = ["__name"]
 
     form = NormaliseForm
+
+    def _output_table(self,o):
+        return "<a href='/tablemanager/normaltable/{0}/'>{1}</a>".format(o.output_table.pk,o.output_table)
+
+    _output_table.allow_tags = True
+    _output_table.short_description = "Output table"
 
     def custom_delete_selected(self,request,queryset):
         if request.POST.get('post') != 'yes':
@@ -539,13 +564,19 @@ class NormaliseAdmin(BorgAdmin,JobFields):
         return actions 
 
 class PublishAdmin(BorgAdmin,JobFields):
-    list_display = ("name","workspace","spatial_type_desc","_default_style","interval","_enabled","_publish_content","_job_id", "_job_batch_id", "_job_status","waiting","running","completed","failed")
+    list_display = ("name","_workspace","spatial_type_desc","_default_style","interval","_enabled","_publish_content","_job_id", "_job_batch_id", "_job_status","waiting","running","completed","failed")
     readonly_fields = ("_default_style","applications","_create_table_sql","spatial_type_desc","last_modify_time","_publish_content","_job_batch_id","_job_id","_job_status","_job_message","waiting","running","completed","failed")
     search_fields = ["name","status","workspace__name"]
 
     form = PublishForm
 
     _geoserver_setting_fields = [f[0] for f in PublishForm.base_fields.items() if hasattr(f[1],"setting_type") and f[1].setting_type == "geoserver_setting"]
+
+    def _workspace(self,o):
+        return "<a href='/tablemanager/workspace/{0}/'>{1}</a>".format(o.workspace.pk,o.workspace)
+
+    _workspace.allow_tags = True
+    _workspace.short_description = "Workspace"
 
     def _enabled(self,o):
         return o.status == ResourceStatus.Enabled.name
@@ -798,10 +829,16 @@ class PublishAdmin(BorgAdmin,JobFields):
         return actions 
 
 class StyleAdmin(BorgAdmin):
-    list_display = ("id","publish","name","_default_style","_enabled","last_modify_time")
+    list_display = ("id","_publish","name","_default_style","_enabled","last_modify_time")
     search_fields = ["name","status","publish__name"]
 
     form = StyleForm
+
+    def _publish(self,o):
+        return "<a href='/tablemanager/publish/?q={0}'>{1}</a>".format(o.publish.name,o.publish)
+
+    _publish.allow_tags = True
+    _publish.short_description = "Publish"
 
     def _default_style(self,o):
         return o.default_style if o else False

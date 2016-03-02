@@ -16,12 +16,18 @@ from borg_utils.hg_batch_push import try_set_push_owner, try_clear_push_owner, i
 logger = logging.getLogger(__name__)
 
 class LayerGroupAdmin(admin.ModelAdmin):
-    list_display = ("name","workspace" ,"title","srs", "status","last_publish_time","last_unpublish_time", "last_modify_time")
-    readonly_fields = ("status","last_publish_time","last_unpublish_time","last_modify_time")
+    list_display = ("name","workspace" ,"title","srs", "status","last_publish_time","last_unpublish_time", "last_modify_time","_layers")
+    readonly_fields = ("status","last_publish_time","last_unpublish_time","last_modify_time","_layers")
     search_fields = ["name","status"]
     ordering = ("name",)
 
     form = LayerGroupForm
+
+    def _layers(self,o):
+        return "<a href='/layergroup/layergrouplayers/?q={}'>Layers</a>".format(o.name)
+
+    _layers.allow_tags = True
+    _layers.short_description = "Layers"
 
     def publish(self,request,queryset):
         self._change_status(request,queryset,ResourceAction.PUBLISH,["status","last_publish_time","last_unpublish_time"])
@@ -166,12 +172,18 @@ class LayerGroupAdmin(admin.ModelAdmin):
         return actions 
 
 class LayerGroupLayersAdmin(admin.ModelAdmin):
-    list_display = ("group","order" ,"_wmslayer")
+    list_display = ("id","_group","order" ,"_wmslayer")
     readonly_fields = ()
     search_fields = ["group__name","layer__name"]
     ordering = ["group","order"]
 
     form = LayerGroupLayersForm
+
+    def _group(self,o):
+        return "<a href='/layergroup/layergroup/{0}/'>{1}</a>".format(o.group.pk,o.group.name)
+
+    _group.allow_tags = True
+    _group.short_description = "Group"
 
     def _wmslayer(self,o):
         if o.layer:
