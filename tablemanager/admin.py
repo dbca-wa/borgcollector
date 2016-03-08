@@ -59,7 +59,7 @@ class JobFields(object):
 
     def _job_id(self,o):
         if o.job_id:
-            return "<a href='/harvest/job/{0}'>{0}</a>".format(o.job_id)
+            return "<a href='/harvest/job/{0}/'>{0}</a>".format(o.job_id)
         else:
             return ''
 
