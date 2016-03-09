@@ -1823,6 +1823,62 @@ class Workspace(BorgModel,SignalEnable):
 
         cursor.execute(sql)
 
+    def output_filename(self,action='publish'):
+        if action == 'publish':
+            return os.path.join(self.publish_channel.name,"workspaces", "{}.json".format(self.name))
+        else:
+            return os.path.join(self.publish_channel.name,"workspaces", "{}.{}.json".format(self.name,action))
+
+    def output_filename_abs(self,action='publish'):
+        return os.path.join(BorgConfiguration.BORG_STATE_REPOSITORY, self.output_filename(action))
+
+    def is_up_to_date(self,job=None,enforce=False):
+        """
+        Returns PublishAction object.
+        """
+        #import ipdb;ipdb.set_trace();
+        if self.publish_status != ResourceStatus.Enabled:
+            return None
+
+        publish_action = self.publish_action
+
+    def publish(self):
+        if not self.publish_channel.sync_postgres_data:
+            raise ValidationError("The publish channel({1}) of {0} does not support postgres.".format(self.name,self.publish_channel.name))
+        try_set_push_owner("workspace")
+        hg = None
+        try:
+            json_file = self.output_filename_abs('publish')
+            # Write JSON output file
+            json_out = {}
+            json_out["schema"] = self.publish_schema
+            json_out["data_schema"] = self.publish_data_schema
+            json_out["outdated_schema"] = self.publish_outdated_schema
+            json_out["channel"] = self.publish_channel.name
+            json_out["sync_postgres_data"] = self.publish_channel.sync_postgres_data
+            json_out["sync_geoserver_data"] = self.publish_channel.sync_geoserver_data
+            json_out["action"] = 'publish'
+            json_out["auth_level"] = self.auth_level
+            json_out["publish_time"] = timezone.localtime(timezone.now()).strftime("%Y-%m-%d %H:%M:%S.%f")
+
+            #create the dir if required
+            if not os.path.exists(os.path.dirname(json_file)):
+                os.makedirs(os.path.dirname(json_file))
+
+            with open(json_file, "wb") as output:
+                json.dump(json_out, output, indent=4)
+
+            hg = hglib.open(BorgConfiguration.BORG_STATE_REPOSITORY)
+            hg.commit(include=[json_file],addremove=True, user=BorgConfiguration.BORG_STATE_USER, message="Update workspace {}".format(self.name))
+
+            increase_committed_changes()
+
+            try_push_to_repository('workspace',hg)
+
+        finally:
+            if hg: hg.close()
+            try_clear_push_owner("workspace")
+
     def delete(self,using=None):
         logger.info('Delete {0}:{1}'.format(type(self),self.name))
         if try_set_push_owner("workspace"):
