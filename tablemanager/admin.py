@@ -274,6 +274,46 @@ class WorkspaceAdmin(BorgAdmin):
         else:
             messages.success(request, "All selected workspaces are deleted successfully")
 
+    def publish(self,request,queryset):
+        result = None
+        failed_objects = []
+        #import ipdb;ipdb.set_trace()
+        try_set_push_owner("workspace_admin",enforce=True)
+        warning_message = None
+        try:
+            for workspace in queryset:
+                try:
+                    workspace.publish()
+                except:
+                    error = sys.exc_info()
+                    failed_objects.append((workspace.name,traceback.format_exception_only(error[0],error[1])))
+                    #remove failed, continue to process the next publish
+                    continue
+
+            try:
+                try_push_to_repository('workspace_admin',enforce=True)
+            except:
+                error = sys.exc_info()
+                warning_message = traceback.format_exception_only(error[0],error[1])
+                logger.error(traceback.format_exc())
+        finally:
+            try_clear_push_owner("workspace_admin",enforce=True)
+
+        if failed_objects or warning_message:
+            if failed_objects:
+                if warning_message:
+                    messages.warning(request, mark_safe("<ul><li>{0}</li><li>Pushing changes to repository failed:<ul>{1}</ul></li></ul>".format(warning_message,"".join(["<li>{0} : {1}</li>".format(o[0],o[1]) for o in failed_objects]))))
+                else:
+                    messages.warning(request, mark_safe("Publish failed for some selected workspaces:<ul>{0}</ul>".format("".join(["<li>{0} : {1}</li>".format(o[0],o[1]) for o in failed_objects]))))
+            else:
+                messages.warning(request, mark_safe(warning_message))
+        else:
+            messages.success(request, "Publish successfully for all selected workspaces")
+
+
+    publish.short_description = "Publish"
+
+    actions = ['publish']
     def get_actions(self, request):
         #import ipdb;ipdb.set_trace()
         actions = super(WorkspaceAdmin, self).get_actions(request)
