@@ -29,6 +29,8 @@ DROP ROLE IF EXISTS "{{ role.name }}";
 /*****************   remove geoserver user and role*************************************/
 /*******************************************************************************************/
 
+\connect kmi
+
 /*-----------------------------remove geo server roles ane users ----------------------------------*/
 /* Remove users and user_roles for removed user*/
 {% for user in removed_users %}
@@ -44,12 +46,12 @@ DELETE FROM gs_auth.users WHERE name = '{{user.name}}';
 /* Remove GeoServer auth records for each removed access group (if necessary) */
 {% for role in removed_roles %}
 DELETE FROM gs_auth.user_roles WHERE rolename = '{{ role.name }}';
-DELETE FROM gs_auth.roles WHERE name='{{ role.name }}');
+DELETE FROM gs_auth.roles WHERE name='{{ role.name }}';
 {% endfor %}
 
 {% for role in roles %}
 DELETE FROM gs_auth.user_roles WHERE rolename = '{{ role.name }}';
-DELETE FROM gs_auth.roles WHERE name='{{ role.name }}');
+DELETE FROM gs_auth.roles WHERE name='{{ role.name }}';
 {% endfor %}
 
 /* Manual override for GeoServer "admin" user */
