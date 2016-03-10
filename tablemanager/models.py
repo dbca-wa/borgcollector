@@ -31,6 +31,7 @@ from django.template import Context, Template
 from django.contrib import messages
 from django.conf import settings
 from django.utils.safestring import SafeText
+from django.template.loader import render_to_string
 
 import hglib
 from codemirror import CodeMirrorTextarea
@@ -1822,6 +1823,84 @@ class Workspace(BorgModel,SignalEnable):
             sql = ";".join(["CREATE SCHEMA IF NOT EXISTS \"{}\"".format(s) for s in [self.schema,self.view_schema,self.publish_data_schema]])
 
         cursor.execute(sql)
+
+    def output_filename(self,action='publish'):
+        if action == 'publish':
+            return os.path.join(self.publish_channel.name,"workspaces", "{}.json".format(self.name))
+        else:
+            return os.path.join(self.publish_channel.name,"workspaces", "{}.{}.json".format(self.name,action))
+
+    def output_filename_abs(self,action='publish'):
+        return os.path.join(BorgConfiguration.BORG_STATE_REPOSITORY, self.output_filename(action))
+
+    def is_up_to_date(self,job=None,enforce=False):
+        """
+        Returns PublishAction object.
+        """
+        #import ipdb;ipdb.set_trace();
+        if self.publish_status != ResourceStatus.Enabled:
+            return None
+
+        publish_action = self.publish_action
+
+    def publish(self):
+        try_set_push_owner("workspace")
+        hg = None
+        try:
+            json_files = []
+            if self.publish_channel.sync_postgres_data:
+                json_file = self.output_filename_abs('publish')
+                # Write JSON output file
+                json_out = {}
+                json_out["schema"] = self.publish_schema
+                json_out["data_schema"] = self.publish_data_schema
+                json_out["outdated_schema"] = self.publish_outdated_schema
+                json_out["channel"] = self.publish_channel.name
+                json_out["sync_postgres_data"] = self.publish_channel.sync_postgres_data
+                json_out["sync_geoserver_data"] = self.publish_channel.sync_geoserver_data
+                json_out["action"] = 'publish'
+                json_out["auth_level"] = self.auth_level
+                json_out["publish_time"] = timezone.localtime(timezone.now()).strftime("%Y-%m-%d %H:%M:%S.%f")
+
+                #create the dir if required
+                if not os.path.exists(os.path.dirname(json_file)):
+                    os.makedirs(os.path.dirname(json_file))
+
+                with open(json_file, "wb") as output:
+                    json.dump(json_out, output, indent=4)
+                json_files.append(json_file)
+
+            if self.publish_channel.sync_geoserver_data:
+                workspaces = Workspace.objects.filter(publish_channel=self.publish_channel).order_by('name')
+        
+                # Generate user data SQL through template
+                latest_data = render_to_string("layers.properties", {"workspaces": workspaces})
+                old_data = None
+                access_rule_json_file = os.path.join(BorgConfiguration.BORG_STATE_REPOSITORY,self.publish_channel.name, "layers.properties")
+                #create dir if required
+                if os.path.exists(access_rule_json_file):
+                    with open(access_rule_json_file,"rb") as output_file:
+                        old_data = output_file.read()
+                elif not os.path.exists(os.path.dirname(access_rule_json_file)):
+                    os.makedirs(os.path.dirname(access_rule_json_file))
+        
+                if not old_data or old_data != latest_data:
+                    # Write output layer access rule, commit + push
+                    with open(access_rule_json_file, "wb") as output:
+                        output.write(latest_data)
+                    json_files.append(access_rule_json_file)
+
+            if json_files:
+                hg = hglib.open(BorgConfiguration.BORG_STATE_REPOSITORY)
+                hg.commit(include=json_files,addremove=True, user=BorgConfiguration.BORG_STATE_USER, message="Update workspace {}".format(self.name))
+
+                increase_committed_changes()
+
+                try_push_to_repository('workspace',hg)
+
+        finally:
+            if hg: hg.close()
+            try_clear_push_owner("workspace")
 
     def delete(self,using=None):
         logger.info('Delete {0}:{1}'.format(type(self),self.name))
