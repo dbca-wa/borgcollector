@@ -65,7 +65,7 @@ INSTALLED_APPS = (
     'tablemanager',
     'harvest',
     'filemanager',
-    'rolemanager',
+    #'rolemanager',
     'application',
     'wmsmanager',
     'layergroup',
