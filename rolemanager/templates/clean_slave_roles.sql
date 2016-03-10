@@ -9,7 +9,7 @@
 /*-----------------------------remove users ------------------------------------------------------*/
 {% for user in removed_users %}
 DROP ROLE IF EXISTS "{{ user.name }}";
-{% endfor %
+{% endfor %}
 
 {% for user in users %}
 DROP ROLE IF EXISTS "{{ user.name }}";
