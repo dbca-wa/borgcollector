@@ -31,6 +31,7 @@ from django.template import Context, Template
 from django.contrib import messages
 from django.conf import settings
 from django.utils.safestring import SafeText
+from django.template.loader import render_to_string
 
 import hglib
 from codemirror import CodeMirrorTextarea
@@ -1843,37 +1844,59 @@ class Workspace(BorgModel,SignalEnable):
         publish_action = self.publish_action
 
     def publish(self):
-        if not self.publish_channel.sync_postgres_data:
-            raise ValidationError("The publish channel({1}) of {0} does not support postgres.".format(self.name,self.publish_channel.name))
         try_set_push_owner("workspace")
         hg = None
         try:
-            json_file = self.output_filename_abs('publish')
-            # Write JSON output file
-            json_out = {}
-            json_out["schema"] = self.publish_schema
-            json_out["data_schema"] = self.publish_data_schema
-            json_out["outdated_schema"] = self.publish_outdated_schema
-            json_out["channel"] = self.publish_channel.name
-            json_out["sync_postgres_data"] = self.publish_channel.sync_postgres_data
-            json_out["sync_geoserver_data"] = self.publish_channel.sync_geoserver_data
-            json_out["action"] = 'publish'
-            json_out["auth_level"] = self.auth_level
-            json_out["publish_time"] = timezone.localtime(timezone.now()).strftime("%Y-%m-%d %H:%M:%S.%f")
+            json_files = []
+            if self.publish_channel.sync_postgres_data:
+                json_file = self.output_filename_abs('publish')
+                # Write JSON output file
+                json_out = {}
+                json_out["schema"] = self.publish_schema
+                json_out["data_schema"] = self.publish_data_schema
+                json_out["outdated_schema"] = self.publish_outdated_schema
+                json_out["channel"] = self.publish_channel.name
+                json_out["sync_postgres_data"] = self.publish_channel.sync_postgres_data
+                json_out["sync_geoserver_data"] = self.publish_channel.sync_geoserver_data
+                json_out["action"] = 'publish'
+                json_out["auth_level"] = self.auth_level
+                json_out["publish_time"] = timezone.localtime(timezone.now()).strftime("%Y-%m-%d %H:%M:%S.%f")
 
-            #create the dir if required
-            if not os.path.exists(os.path.dirname(json_file)):
-                os.makedirs(os.path.dirname(json_file))
+                #create the dir if required
+                if not os.path.exists(os.path.dirname(json_file)):
+                    os.makedirs(os.path.dirname(json_file))
 
-            with open(json_file, "wb") as output:
-                json.dump(json_out, output, indent=4)
+                with open(json_file, "wb") as output:
+                    json.dump(json_out, output, indent=4)
+                json_files.append(json_file)
 
-            hg = hglib.open(BorgConfiguration.BORG_STATE_REPOSITORY)
-            hg.commit(include=[json_file],addremove=True, user=BorgConfiguration.BORG_STATE_USER, message="Update workspace {}".format(self.name))
+            if self.publish_channel.sync_geoserver_data:
+                workspaces = Workspace.objects.filter(publish_channel=self.publish_channel).order_by('name')
+        
+                # Generate user data SQL through template
+                latest_data = render_to_string("layers.properties", {"workspaces": workspaces})
+                old_data = None
+                access_rule_json_file = os.path.join(BorgConfiguration.BORG_STATE_REPOSITORY,self.publish_channel.name, "layers.properties")
+                #create dir if required
+                if os.path.exists(access_rule_json_file):
+                    with open(access_rule_json_file,"rb") as output_file:
+                        old_data = output_file.read()
+                elif not os.path.exists(os.path.dirname(access_rule_json_file)):
+                    os.makedirs(os.path.dirname(access_rule_json_file))
+        
+                if not old_data or old_data != latest_data:
+                    # Write output layer access rule, commit + push
+                    with open(access_rule_json_file, "wb") as output:
+                        output.write(latest_data)
+                    json_files.append(access_rule_json_file)
 
-            increase_committed_changes()
+            if json_files:
+                hg = hglib.open(BorgConfiguration.BORG_STATE_REPOSITORY)
+                hg.commit(include=json_files,addremove=True, user=BorgConfiguration.BORG_STATE_USER, message="Update workspace {}".format(self.name))
 
-            try_push_to_repository('workspace',hg)
+                increase_committed_changes()
+
+                try_push_to_repository('workspace',hg)
 
         finally:
             if hg: hg.close()
