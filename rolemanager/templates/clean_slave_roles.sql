@@ -8,28 +8,96 @@
 
 /*-----------------------------remove users ------------------------------------------------------*/
 {% for user in removed_users %}
-DROP ROLE IF EXISTS "{{ user.name }}";
+DO
+$$BEGIN
+    IF '{{user.name}}' != current_role AND  EXISTS(SELECT 1 FROM pg_roles WHERE rolname = '{{user.name}}') THEN
+        DROP ROLE IF EXISTS "{{ user.name }}";
+    END IF;
+END$$;
 {% endfor %}
 
 {% for user in users %}
-DROP ROLE IF EXISTS "{{ user.name }}";
+DO
+$$BEGIN
+    IF '{{user.name}}' != current_role AND  EXISTS(SELECT 1 FROM pg_roles WHERE rolname = '{{user.name}}') THEN
+        DROP ROLE IF EXISTS "{{ user.name }}";
+    END IF;
+END$$;
 {% endfor %}
 
+\connect kmi
 /*-----------------------------remove roles ------------------------------------------------------*/
 {% for role in removed_roles %}
-DROP ROLE IF EXISTS "{{ role.name }}";
+DO
+$$BEGIN
+    IF EXISTS(SELECT 1 FROM pg_namespace WHERE nspname = '{{role.name}}') THEN
+        IF '{{role.name}}' != current_role AND EXISTS(SELECT 1 FROM pg_roles WHERE rolname = '{{role.name}}') THEN
+            REVOKE ALL ON SCHEMA {{ role.name }} FROM {{ role.name }}; 
+            REVOKE ALL ON ALL TABLES IN SCHEMA {{ role.name }} FROM {{ role.name }};
+            ALTER DEFAULT PRIVILEGES IN SCHEMA {{ role.name }} REVOKE SELECT ON TABLES FROM {{ role.name }};
+        END IF;
+        IF EXISTS(SELECT 1 FROM pg_roles WHERE rolname = 'domain_admins') THEN
+            REVOKE ALL ON SCHEMA {{ role.name }} FROM domain_admins; 
+            REVOKE ALL ON ALL TABLES IN SCHEMA {{ role.name }} FROM domain_admins;
+            ALTER DEFAULT PRIVILEGES IN SCHEMA {{ role.name }} REVOKE SELECT ON TABLES FROM domain_admins;
+        END IF;
+    END IF;
+END$$;
 {% endfor %}
 
 {% for role in roles %}
-DROP ROLE IF EXISTS "{{ role.name }}";
+DO
+$$BEGIN
+    IF EXISTS(SELECT 1 FROM pg_namespace WHERE nspname = '{{role.name}}') THEN
+        IF '{{role.name}}' != current_role AND EXISTS(SELECT 1 FROM pg_roles WHERE rolname = '{{role.name}}') THEN
+            REVOKE ALL ON SCHEMA {{ role.name }} FROM {{ role.name }}; 
+            REVOKE ALL ON ALL TABLES IN SCHEMA {{ role.name }} FROM {{ role.name }};
+            ALTER DEFAULT PRIVILEGES IN SCHEMA {{ role.name }} REVOKE SELECT ON TABLES FROM {{ role.name }};
+        END IF;
+        IF EXISTS(SELECT 1 FROM pg_roles WHERE rolname = 'domain_admins') THEN
+            REVOKE ALL ON SCHEMA {{ role.name }} FROM domain_admins; 
+            REVOKE ALL ON ALL TABLES IN SCHEMA {{ role.name }} FROM domain_admins;
+            ALTER DEFAULT PRIVILEGES IN SCHEMA {{ role.name }} REVOKE SELECT ON TABLES FROM domain_admins;
+        END IF;
+    END IF;
+END$$;
 {% endfor %}
 
+{% for role in removed_roles %}
+DO
+$$BEGIN
+    IF '{{role.name}}' != current_role AND EXISTS(SELECT 1 FROM pg_roles WHERE rolname = '{{role.name}}') THEN
+        DROP ROLE IF EXISTS "{{ role.name }}";
+    END IF;
+END$$;
+{% endfor %}
+
+{% for role in roles %}
+DO
+$$BEGIN
+    IF '{{role.name}}' != current_role AND EXISTS(SELECT 1 FROM pg_roles WHERE rolname = '{{role.name}}') THEN
+        DROP ROLE IF EXISTS "{{ role.name }}";
+    END IF;
+END$$;
+{% endfor %}
+
+/*-----------------------------drop not required schmeas ------------------------------------------------------*/
+DO
+$$BEGIN
+    IF EXISTS(SELECT 1 FROM pg_namespace WHERE nspname = 'domain_admins') THEN
+        DROP SCHEMA IF EXISTS domain_admins;
+    END IF;
+END$$;
+DO
+$$BEGIN
+    IF EXISTS(SELECT 1 FROM pg_namespace WHERE nspname = 'everyone') THEN
+        DROP SCHEMA IF EXISTS everyone;
+    END IF;
+END$$;
 
 /*******************************************************************************************/
 /*****************   remove geoserver user and role*************************************/
 /*******************************************************************************************/
-
-\connect kmi
 
 /*-----------------------------remove geo server roles ane users ----------------------------------*/
 /* Remove users and user_roles for removed user*/
