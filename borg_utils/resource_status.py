@@ -283,7 +283,9 @@ class ResourceStatusManagement(object):
         Return True: publish the resource
                False: no action is required
         """
-        if getattr(threading.current_thread,"resource_id",None) != id(self):
+        if not hasattr(threading.current_thread,"resource_id"):
+            return False
+        elif getattr(threading.current_thread,"resource_id",None) != id(self):
             raise ValidationError("Resource object does not match.")
         else:
             return getattr(threading.current_thread,"resource_action",None) == ResourceAction.PUBLISH
@@ -295,7 +297,9 @@ class ResourceStatusManagement(object):
         Return True: unpublish the resource
                False: no action is required
         """
-        if getattr(threading.current_thread,"resource_id",None) != id(self):
+        if not hasattr(threading.current_thread,"resource_id"):
+            return False
+        elif getattr(threading.current_thread,"resource_id",None) != id(self):
             raise ValidationError("Resource object does not match.")
         else:
             return getattr(threading.current_thread,"resource_action",None) == ResourceAction.UNPUBLISH
