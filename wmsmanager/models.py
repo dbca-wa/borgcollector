@@ -76,6 +76,7 @@ class WmsServer(models.Model,ResourceStatusManagement,SignalEnable):
             o = WmsServer.objects.get(pk=self.pk)
         except ObjectDoesNotExist:
             o = None
+            self.status = ResourceStatus.New.name
 
         if (o 
             and o.name == self.name 
@@ -95,9 +96,7 @@ class WmsServer(models.Model,ResourceStatusManagement,SignalEnable):
         if o:
             #already exist
             self.status = o.next_status(ResourceAction.UPDATE)
-        else:
-            #not exist before
-            self.status = ResourceStatus.New.name
+
         self.last_modify_time = timezone.now()
 
     @property
@@ -130,6 +129,7 @@ class WmsServer(models.Model,ResourceStatusManagement,SignalEnable):
 
             self.layers = layer_size
             self.last_refresh_time = now
+            self.status = self.next_status()
             if save:
                 self.save()
         refresh_select_choices.send(self,choice_family="wmslayer")
