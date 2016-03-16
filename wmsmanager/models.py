@@ -5,6 +5,7 @@ import requests
 import logging
 import hglib
 import urllib
+import traceback
 from xml.etree import ElementTree
 from xml.dom import minidom
 
@@ -89,7 +90,7 @@ class WmsServer(models.Model,ResourceStatusManagement,SignalEnable):
             raise ValidationError("Not changed.")
 
         if not o or o.capability_url != self.capability_url:
-           self.refresh_layers()
+           self.refresh_layers(False)
 
         if o:
             #already exist
@@ -103,7 +104,7 @@ class WmsServer(models.Model,ResourceStatusManagement,SignalEnable):
     def get_capability_url(self):
         return "{0}?service=WMS&request=GetCapabilities&version=1.1.1".format(self.capability_url)
 
-    def refresh_layers(self):
+    def refresh_layers(self,save=True):
         result = None
         #modify the table data
         now = timezone.now()
@@ -129,7 +130,8 @@ class WmsServer(models.Model,ResourceStatusManagement,SignalEnable):
 
             self.layers = layer_size
             self.last_refresh_time = now
-            self.save()
+            if save:
+                self.save()
         refresh_select_choices.send(self,choice_family="wmslayer")
 
                 
