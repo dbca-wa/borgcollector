@@ -285,7 +285,7 @@ class ResourceStatusManagement(object):
         """
         if not hasattr(threading.current_thread,"resource_id"):
             return False
-        elif getattr(threading.current_thread,"resource_id",None) != id(self):
+        elif getattr(threading.current_thread,"resource_id",None) != self.pk:
             raise ValidationError("Resource object does not match.")
         else:
             return getattr(threading.current_thread,"resource_action",None) == ResourceAction.PUBLISH
@@ -299,17 +299,20 @@ class ResourceStatusManagement(object):
         """
         if not hasattr(threading.current_thread,"resource_id"):
             return False
-        elif getattr(threading.current_thread,"resource_id",None) != id(self):
+        elif getattr(threading.current_thread,"resource_id",None) != self.pk:
             raise ValidationError("Resource object does not match.")
         else:
             return getattr(threading.current_thread,"resource_action",None) == ResourceAction.UNPUBLISH
 
-    def next_status(self,action):
+    def next_status(self,action=None):
         """
         Return next_status based on action
         """
-        s = self.publish_status.next_status(action)
-        setattr(threading.current_thread,"resource_id",id(self))
+        if action:
+            s = self.publish_status.next_status(action)
+        else:
+            s = (self.publish_status,False)
+        setattr(threading.current_thread,"resource_id",self.pk)
         setattr(threading.current_thread,"resource_action",(ResourceAction.PUBLISH if s[1] and s[0].published else (ResourceAction.UNPUBLISH if s[1] and s[0].unpublished else ResourceAction.NONE)))
 
         return s[0].name
