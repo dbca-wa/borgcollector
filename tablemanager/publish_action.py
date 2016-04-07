@@ -4,7 +4,7 @@ from django.db.models.signals import pre_save,post_save,post_delete
 from django.dispatch import receiver
 
 from borg_utils.resource_status import ResourceStatus
-from tablemanager.models import Publish,Style
+from tablemanager.models import Publish
 
 class PublishAction(object):
     """
@@ -21,13 +21,8 @@ class PublishAction(object):
         "relation_1":publish_data_action,
         "relation_2":publish_data_action,
         "relation_3":publish_data_action,
-        "default_style": publish_feature_action,
-        "styles": publish_feature_action,
         "normal_tables":publish_data_action,
         "create_extra_index_sql": publish_data_action,
-        "kmi_title": publish_feature_action,
-        "kmi_abstract":publish_feature_action,
-        "applications":publish_feature_action,
         "geoserver_setting":publish_gwc_action
     }
 
@@ -68,14 +63,14 @@ class PublishAction(object):
         if instance.pk:
             existing_instance = Publish.objects.get(pk = instance.pk)
 
-        self._action = 0
+        self._action = instance.pending_actions or 0
         if existing_instance:
-            self._action = existing_instance.pending_actions or 0
-
             for f in  instance._meta.fields:
+                if f.name not in self._change_type_mapping:
+                    continue
                 rel1 = getattr(instance,f.name)
                 rel2 = getattr(existing_instance,f.name)
-                if isinstance(f,models.OneToOneField):
+                if f.name in ["relation_1","relation_2","relation_3"]:
                     if (rel1 == None or rel1.is_empty):
                         if (rel2 == None or rel2.is_empty):
                             pass
@@ -171,50 +166,9 @@ class PublishActionEventListener(object):
             if len(args["update_fields"]) == 1 and "pending_actions" in args["update_fields"]:
                 return
             elif "status" in args["update_fields"] and instance.status == ResourceStatus.Enabled.name:
-                instance.pending_actions = PublishAction.publish_all_action.actions
+                instance.pending_actions = PublishAction.publish_all_action
                 return
 
         instance.pending_actions = PublishAction().edit(instance).actions
 
-    @staticmethod
-    @receiver(post_delete, sender=Style)
-    def _style_post_delete(sender, instance, **args):
-        if not instance.pk:
-            return
-        o = None
-        try:
-            o = Style.objects.get(pk=instance.pk)
-        except:
-            return
-        if o.status == ResourceStatus.Disabled.name:
-            return
-
-        instance.publish.pending_actions = instance.publish.publish_action.column_changed("styles").actions
-        instance.publish.save(update_fields=["pending_actions"])
-
-    @staticmethod
-    @receiver(pre_save, sender=Style)
-    def _style_pre_save(sender, instance, **args):
-        o = None
-        if instance.pk:
-            try:
-                o = Style.objects.get(pk=instance.pk)
-            except:
-                pass
-        if o:
-            #update a style
-            if o.status == instance.status:
-                #style's status is not changed
-                if o.status == ResourceStatus.Disabled.name:
-                    #style is disalbed
-                    return
-                elif o.sld == instance.sld:
-                    #style is enabled,but sld is same
-                    return
-        elif instance.status == ResourceStatus.Disabled.name:
-            #new style, but is disabled
-            return
-                
-        instance.publish.pending_actions = instance.publish.publish_action.column_changed("styles").actions
-        instance.publish.save(update_fields=["pending_actions"])
 

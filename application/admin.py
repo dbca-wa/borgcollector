@@ -24,7 +24,7 @@ class Application_LayersAdmin(VersionAdmin):
 
     def _publish(self, o):
         if o.publish:
-            return "<a href='/tablemanager/publish/{0}'>{1}</a>".format(
+            return "<a href='/tablemanager/publish/{0}/'>{1}</a>".format(
                 o.publish.pk, o.publish.name)
         else:
             return ""
@@ -33,7 +33,7 @@ class Application_LayersAdmin(VersionAdmin):
 
     def _wmslayer(self, o):
         if o.wmslayer:
-            return "<a href='/wmsmanager/wmslayer/{0}'>{1}</a>".format(
+            return "<a href='/wmsmanager/wmslayer/{0}/'>{1}</a>".format(
                 o.wmslayer.pk, o.wmslayer.name)
         else:
             return ""

@@ -46,6 +46,7 @@ class HarvestDatasource(object):
                 i.ds_modify_time = new_modify_time
                 i.save(update_fields=["ds_modify_time"])
                 counter += 1
+                """
                 #try to reload style file for spatial publish
                 for p in i.publish_set.all() :
                     if SpatialTable.check_normal(p.spatial_type):
@@ -88,7 +89,7 @@ class HarvestDatasource(object):
 
                         existing_builtin_style.delete()
                         delete_style_counter += 1
-
+                """
         return (counter,reload_style_counter,delete_style_counter)
 
     def _repeated_harvest(self):

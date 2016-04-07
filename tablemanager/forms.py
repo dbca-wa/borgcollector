@@ -8,7 +8,7 @@ from django.contrib.admin.widgets import RelatedFieldWidgetWrapper
 
 from tablemanager.models import (Normalise,NormalTable,Normalise_NormalTable,Publish,
         Publish_NormalTable,ForeignTable,Input,NormalTable,Workspace,DataSource,
-        PublishChannel,Style,DatasourceType)
+        PublishChannel,DatasourceType)
 from borg_utils.form_fields import GroupedModelChoiceField,CachedModelChoiceField
 from borg_utils.widgets import MultiWidgetLayout
 from borg_utils.form_fields import GeoserverSettingForm,MetaTilingFactorField,GridSetField,BorgSelect
@@ -361,54 +361,4 @@ class PublishForm(BorgModelForm,GeoserverSettingForm):
     class Meta:
         model = Publish
         fields = ('name','workspace','interval','status','input_table','dependents','priority','kmi_title','kmi_abstract','sql','create_extra_index_sql')
-
-class StyleForm(BorgModelForm):
-    """
-    A form for spatial table's Style Model
-    """
-    default_style = forms.BooleanField(required=False,initial=False)
-
-    def __init__(self, *args, **kwargs):
-        kwargs['initial']=kwargs.get('initial',{})
-        instance = None
-        if 'instance' in kwargs and  kwargs['instance']:
-            instance = kwargs['instance']
-
-        if instance:
-            kwargs['initial']['default_style'] = kwargs['instance'].default_style
-
-        super(StyleForm, self).__init__(*args, **kwargs)
-
-        builtin_style = False
-        if instance and instance.pk:
-            self.fields['name'].widget.attrs['readonly'] = True
-
-            self.fields['publish'].widget = self.fields['publish'].widget.widget
-            self.fields['publish'].widget.attrs['readonly'] = True
-
-            builtin_style = instance.name == "builtin"
-            if builtin_style:
-                self.fields['description'].widget.attrs['readonly'] = True
-        
-        options = json.loads(self.fields['sld'].widget.option_json)
-        options['readOnly'] = builtin_style
-        #import ipdb;ipdb.set_trace()
-        self.fields['sld'].widget.option_json = json.dumps(options)
-
-
-
-    def _post_clean(self):
-        self.instance.set_default_style = self.cleaned_data['default_style']
-        super(StyleForm,self)._post_clean()
-        if self.errors:
-            return
-
-
-    class Meta:
-        model = Style
-        fields = ('name','publish','description','status','default_style','sld')
-        widgets = {
-                "publish": BorgSelect(),
-                "description": forms.TextInput(attrs={"style":"width:95%"})
-        }
 
