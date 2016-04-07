@@ -147,7 +147,7 @@ class CheckDsJob(RepeatedJob):
 
     @property
     def last_message(self):
-        return "{} datasources have been changed,{} builtin publish styles are reloaded, {} builtin publish styles are removed."
+        return "{} datasources have been changed."
 
     def execute(self,time):
         return HarvestDatasource(True,0).harvest()
