@@ -394,7 +394,6 @@ class Publishing(HarvestState):
     @classmethod
     def transition_dict(cls):
         return {HarvestStateOutcome.succeed:GenerateLayerAccessRule}
-        #return {HarvestStateOutcome.succeed:PullUserList}
 
     def execute(self,job,previous_state):
         """
@@ -423,76 +422,6 @@ class Publishing(HarvestState):
             result = (HarvestStateOutcome.succeed,None)
 
         return result
-
-class PullUserList(HarvestState):
-    """
-    This state is for pulling the user/group list as JSON from an URL and
-    converting it to a SQL script.
-
-    The list should be formatted as follows:
-    {
-        "user1": ["group1", "group2", ...],
-        "user2": ["group1", "group3", ...],
-        ...
-    }
-    """
-    _name = "Pull User List"
-
-    @classmethod
-    def transition_dict(cls):
-        return {HarvestStateOutcome.succeed:GenerateLayerAccessRule}
-
-    def execute(self, job, previous_state):
-        if BorgConfiguration.USERLIST.startswith("http"):
-            # Load JSON user/group dump from URL
-            try:
-                data = request.get(BorgConfiguration.USERLIST,
-                                auth=requests.auth.HTTPBasicAuth(
-                                    BorgConfiguration.USERLIST_USERNAME,
-                                    BorgConfiguration.USERLIST_PASSWORD
-                                ))
-            except request.exceptions.RequestException as e:
-                return (JobStateOutcome.failed, "Failed to download user list: {}".format(e))
-
-            if data.status_code != 200:
-                return (JobStateOutcome.failed, "GET {} returned HTTP status {}".format(BorgConfiguration.USERLIST, data.status_code))
-
-            user_data_raw = data.content
-        else:
-            try:
-                user_data_raw = open(BorgConfiguration.USERLIST, "rb").read()
-            except:
-                return (JobStateOutcome.failed, "Opening path {} failed".format(BorgConfiguration.USERLIST))
-
-        user_data = json.loads(user_data_raw.decode("utf-8-sig"))
-
-        # Sort data alphabetically, order it for the template
-        keys = user_data.keys()
-        keys.sort()
-        users = [{"name": k, "groups": user_data[k]} for k in keys]
-        roles = set()
-        for g in user_data.values():
-            roles.update(g)
-
-        # Generate user data SQL through template
-        result = render_to_string("slave_roles.sql", {"users": users, "roles": roles})
-
-        # Write output SQL file, commit + push
-        output_filename = os.path.join(BorgConfiguration.BORG_STATE_REPOSITORY, "slave_roles.sql")
-        with open(output_filename, "w", encoding="utf-8") as output:
-            output.write(result)
-
-        # Try and commit to repository, if no changes then continue
-        hg = hglib.open(BorgConfiguration.BORG_STATE_REPOSITORY)
-        try:
-            hg.commit(include=output_filename, user=BorgConfiguration.BORG_STATE_USER, message="{} - roles updated".format(job.publish.job_batch_id))
-        except hglib.error.CommandError as e:
-            if e.out != "nothing changed\n":
-                return (HarvestStateOutcome.failed, self.get_exception_message())
-        finally:
-            hg.close()
-
-        return (JobStateOutcome.succeed, None)
 
 class GenerateLayerAccessRule(HarvestState):
     """

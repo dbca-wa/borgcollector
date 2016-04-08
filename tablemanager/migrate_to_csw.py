@@ -1,4 +1,5 @@
 import os
+import re
 from datetime import datetime
 import pytz
 import requests
@@ -11,12 +12,17 @@ from tablemanager.models import Publish
 from harvest.models import Job
 from borg_utils.resource_status import ResourceStatus,ResourceStatusManagement
 
+migrate_info = {}
 def migrate_all(debug=False):
     """
     Migrate all meta data to csw
     """
     for p in Publish.objects.all():
         migrate(p,debug)
+
+    if debug: print "\n".join(["{}={}".format(key,migrate_info[key]) for key in migrate_info.iterkeys()])
+
+empty_regex = re.compile("\s")
 def migrate(p,debug=False):
     """
     Migrate one meta data to csw
@@ -43,15 +49,17 @@ def migrate(p,debug=False):
 
     modify_time = None
     meta_data["auto_update"] = True
-    if p.kmi_title and p.kmi_title.strip():
+    if p.kmi_title and p.kmi_title.strip() and empty_regex.sub("",p.kmi_title) != empty_regex.sub("",meta_data.get("title") or ""):
         #has customized title
         meta_data["title"] = p.kmi_title
         meta_data["auto_update"] = False
+        migrate_info[p.table_name] = migrate_info.get(p.table_name,"") + "title "
 
-    if p.kmi_abstract and p.kmi_abstract.strip():
+    if p.kmi_abstract and p.kmi_abstract.strip() and empty_regex.sub("",p.kmi_abstract) != empty_regex.sub("",meta_data.get("abstract") or ""):
         #has customized abstract
         meta_data["abstract"] = p.kmi_abstract
         meta_data["auto_update"] = False
+        migrate_info[p.table_name] = migrate_info.get(p.table_name,"") + "abstract "
 
     if meta_data["auto_update"]:
         if p.input_table:
@@ -95,9 +103,9 @@ def migrate(p,debug=False):
             try:
                 style = p.style_set.get(name="builtin")
                 builtin_style = {"format":"SLD","content":style.sld.encode("base64")}
-                print "Not found puiltin style, but retrieve it from style table"
+                print "Not found builtin style, but retrieve it from style table"
             except:
-                print "Not found puiltin style"
+                print "Not found builtin style"
     #remove sld style file
     meta_data["styles"] = [style for style in meta_data.get("styles",[]) if style["format"].lower() != "sld"]
 
@@ -121,6 +129,7 @@ def migrate(p,debug=False):
             if builtin_style:
                 #has builtin style, this customized is the revised version of buitlin style, disable auto update
                 meta_data["auto_update"] = False
+                migrate_info[p.table_name] = migrate_info.get(p.table_name,"") + "customized-style "
                 builtin_style_added = True
                 if debug: print "Add customized style as revised default style"
             else:
@@ -145,6 +154,7 @@ def migrate(p,debug=False):
     res = requests.post("{}/catalogue/api/records/".format(settings.CSW_URL),json=meta_data,auth=(settings.CSW_USER,settings.CSW_PASSWORD))
     res.raise_for_status()
     meta_data = res.json()
-    with open("/tmp/{}.{}.json".format(p.workspace.name,p.table_name),"wb") as f:
-        json.dump(meta_data, f, indent=4)
+    if debug:
+        with open("/tmp/{}.{}.json".format(p.workspace.name,p.table_name),"wb") as f:
+            json.dump(meta_data, f, indent=4)
 
