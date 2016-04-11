@@ -167,6 +167,7 @@ class ProcessAdmin(admin.ModelAdmin):
     readonly_fields = ("id","name","desc","server","pid","status","next_scheduled_time","last_starttime","last_endtime","_last_message")
     list_display = ("id","name","server","pid","status","next_scheduled_time","last_starttime","last_endtime","last_message")
     search_fields = ["job_id"]
+    actions = None
 
     def _last_message(self,o):
         if o.message:
