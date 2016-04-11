@@ -1,5 +1,6 @@
 import sys,traceback
 import logging
+import json
 
 from django.contrib import admin
 from django.utils import timezone
@@ -159,17 +160,45 @@ class WmsServerAdmin(admin.ModelAdmin):
         return actions 
 
 class AbstractWmsLayerAdmin(admin.ModelAdmin):
-    list_display = ("name","kmi_name","_workspace","_server","title", "status","last_publish_time","last_unpublish_time", "last_refresh_time","last_modify_time")
-    readonly_fields = ("_workspace","_server","path","title","abstract", "status","applications","last_publish_time","last_unpublish_time", "last_refresh_time","last_modify_time")
+    list_display = ("name","kmi_name","_workspace","_server","title","crs", "status","last_publish_time","last_unpublish_time","last_modify_time")
+    readonly_fields = ("_workspace","_server","path","title","abstract","crs","_bounding_box", "status","applications","last_publish_time","last_unpublish_time", "last_refresh_time","last_modify_time")
     search_fields = ["name", "title"]
     ordering = ("server","name",)
     list_filter = ("server",)
 
     form = WmsLayerForm
 
+    html = "<table > \
+<tr > \
+    <th style='width:100px;border-bottom:None' align='left'>Min X</th> \
+    <th style='width:100px;border-bottom:None' align='left'>Min Y</th> \
+    <th style='width:100px;border-bottom:None' align='left'>Max X</th> \
+    <th style='width:100px;border-bottom:None' align='left'>Max Y</th> \
+</tr> \
+<tr> \
+    <td style='border-bottom:None'>{}</td> \
+    <td style='border-bottom:None'>{}</td> \
+    <td style='border-bottom:None'>{}</td> \
+    <td style='border-bottom:None'>{}</td> \
+</tr> \
+</table>"
+    def _bounding_box(self,instance):
+        bounding_box = ["-","-","-","-"]
+        if instance.bbox:
+            try:
+                bounding_box = json.loads(instance.bbox)
+                if not bounding_box or not isinstance(bounding_box,list) or len(bounding_box) != 4:
+                    bounding_box = ["-","-","-","-"]
+            except:
+                bounding_box = ["-","-","-","-"]
+
+        return self.html.format(*bounding_box)
+    _bounding_box.allow_tags = True
+    _bounding_box.short_description = "Bounding Box"
+
     def _server(self,o):
         if o.server:
-            return "<a href='/wmsmanager/wmsserver/{0}'>{1}</a>".format(o.server.pk,o.server.name)
+            return "<a href='/wmsmanager/wmsserver/{0}/'>{1}</a>".format(o.server.pk,o.server.name)
         else:
             return ""
     _server.allow_tags = True

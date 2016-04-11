@@ -26,15 +26,70 @@ Borg Collector needs the following environment variables defined (e.g. .env for 
  - If required, do an initial syncdb to create the Django model schema.
 
 ## Rest API
-### Create a harvest job.
+### Create harvest jobs.
 ```
    Url : https://host:port/api/jobs/
-   Data: {"publishes":["publish name1","publish name2"]}
-   Response:
-      Success: {"status":true,"message":{"publish name1":"job id : 1","publish name2":"job id : 2"}}
-      Failed: {"status":false,"message":{"publish name1":"job id : 1","publish name2":"Already have a waiting job"}}
+   Data: {"publishes":["publish1","publish2"]}
+   Success Response: 
+        {
+            "status":true,
+            "publish1":{
+                        "status": true,
+                        "job_id":: 1,
+                        "message":"Succeed"
+            },
+            "publish2":{
+                        "status":true,
+                        "job_id":2,
+                        "message":"Succeed"
+            }
+        }
+   Failed Response: 
+        {
+            "status":false,
+            "publish1":{
+                        "status": true,
+                        "job_id":: 1,
+                        "message":"Succeed"
+            },
+            "publish2":{
+                        "status":false,
+                        "message":"Already have a waiting job"
+            }
+        }
+```
+### Publish metadata.
+```
+   Url : https://host:port/api/metajobs/
+   Data: {"layers":["wokspace1:layer1","workspace2:layer2"]}
+   Success Response: 
+        {
+            "status":true,
+            "workspace1:layer1":{
+                        "status": true,
+                        "message":"Succeed"
+            },
+            "workspace2:layer2":{
+                        "status":true,
+                        "message":"Succeed"
+            }
+        }
+   Failed Response: 
+        {
+            "status":false,
+            "workspace1:layer1":{
+                        "status": true,
+                        "message":"Succeed"
+            },
+            "workspace2:layer2":{
+                        "status":false,
+                        "message":"Publish failed"
+            }
+        }
 ```
 ## Model info
+
+Models are important
 
  - Input tables define ogr2ogr vrt sources from which to import data
  - Publish defines a script to publish an input table with

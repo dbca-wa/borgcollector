@@ -8,6 +8,7 @@ from io import open
 import hglib
 import json
 import requests
+from datetime import datetime
 
 from django.db import transaction,models,connection
 from django.utils import timezone
@@ -18,7 +19,6 @@ from django.conf import settings
 
 from tablemanager.models import Publish,Workspace
 from harvest.models import Job
-from application.models import Application_Layers
 from borg_utils.jobintervals import JobInterval
 from borg_utils.singleton import SingletonMetaclass,Singleton
 from borg_utils.borg_config import BorgConfiguration
@@ -394,7 +394,6 @@ class Publishing(HarvestState):
     @classmethod
     def transition_dict(cls):
         return {HarvestStateOutcome.succeed:GenerateLayerAccessRule}
-        #return {HarvestStateOutcome.succeed:PullUserList}
 
     def execute(self,job,previous_state):
         """
@@ -423,76 +422,6 @@ class Publishing(HarvestState):
             result = (HarvestStateOutcome.succeed,None)
 
         return result
-
-class PullUserList(HarvestState):
-    """
-    This state is for pulling the user/group list as JSON from an URL and
-    converting it to a SQL script.
-
-    The list should be formatted as follows:
-    {
-        "user1": ["group1", "group2", ...],
-        "user2": ["group1", "group3", ...],
-        ...
-    }
-    """
-    _name = "Pull User List"
-
-    @classmethod
-    def transition_dict(cls):
-        return {HarvestStateOutcome.succeed:GenerateLayerAccessRule}
-
-    def execute(self, job, previous_state):
-        if BorgConfiguration.USERLIST.startswith("http"):
-            # Load JSON user/group dump from URL
-            try:
-                data = request.get(BorgConfiguration.USERLIST,
-                                auth=requests.auth.HTTPBasicAuth(
-                                    BorgConfiguration.USERLIST_USERNAME,
-                                    BorgConfiguration.USERLIST_PASSWORD
-                                ))
-            except request.exceptions.RequestException as e:
-                return (JobStateOutcome.failed, "Failed to download user list: {}".format(e))
-
-            if data.status_code != 200:
-                return (JobStateOutcome.failed, "GET {} returned HTTP status {}".format(BorgConfiguration.USERLIST, data.status_code))
-
-            user_data_raw = data.content
-        else:
-            try:
-                user_data_raw = open(BorgConfiguration.USERLIST, "rb").read()
-            except:
-                return (JobStateOutcome.failed, "Opening path {} failed".format(BorgConfiguration.USERLIST))
-
-        user_data = json.loads(user_data_raw.decode("utf-8-sig"))
-
-        # Sort data alphabetically, order it for the template
-        keys = user_data.keys()
-        keys.sort()
-        users = [{"name": k, "groups": user_data[k]} for k in keys]
-        roles = set()
-        for g in user_data.values():
-            roles.update(g)
-
-        # Generate user data SQL through template
-        result = render_to_string("slave_roles.sql", {"users": users, "roles": roles})
-
-        # Write output SQL file, commit + push
-        output_filename = os.path.join(BorgConfiguration.BORG_STATE_REPOSITORY, "slave_roles.sql")
-        with open(output_filename, "w", encoding="utf-8") as output:
-            output.write(result)
-
-        # Try and commit to repository, if no changes then continue
-        hg = hglib.open(BorgConfiguration.BORG_STATE_REPOSITORY)
-        try:
-            hg.commit(include=output_filename, user=BorgConfiguration.BORG_STATE_USER, message="{} - roles updated".format(job.publish.job_batch_id))
-        except hglib.error.CommandError as e:
-            if e.out != "nothing changed\n":
-                return (HarvestStateOutcome.failed, self.get_exception_message())
-        finally:
-            hg.close()
-
-        return (JobStateOutcome.succeed, None)
 
 class GenerateLayerAccessRule(HarvestState):
     """
@@ -568,7 +497,7 @@ class DumpFullData(HarvestState):
 
     @classmethod
     def transition_dict(cls):
-        return {HarvestStateOutcome.succeed:DumpStyleFile}
+        return {HarvestStateOutcome.succeed:UpdateCatalogService}
 
     def execute(self,job,previous_state):
         """
@@ -606,24 +535,27 @@ class DumpFullData(HarvestState):
             job.metadict['data'] = {"file":"{}{}".format(BorgConfiguration.MASTER_PATH_PREFIX, dump_file),"md5":file_md5(dump_file)}
             return (HarvestStateOutcome.succeed,None)
 
-class DumpStyleFile(HarvestState):
+class UpdateCatalogService(HarvestState):
     """
-    The state is for configuring the geo server, and save the configuration file into file system.
+    The state is to update meta data on catalog service.
     """
-    _name = "Dump style files"
+    _name = "Update Catalog Service"
 
     @classmethod
     def transition_dict(cls):
         return {HarvestStateOutcome.succeed:SubmitToVersionControl}
 
     def execute(self,job,previous_state):
-        # TBD
-        job.metadict['styles'] = {}
-    
-        style_file_name = None
-        for style in job.publish.style_set.filter(status=ResourceStatus.Enabled.name):
-            style_file_name = style.dump(job.dump_dir)
-            job.metadict['styles'][style.name] = {"file":"{}{}".format(BorgConfiguration.MASTER_PATH_PREFIX, style_file_name),"md5":file_md5(style_file_name)}
+        p = job.publish
+        meta_data = p.update_catalogue_service(style_dump_dir=job.dump_dir,md5=True,extra_datas={"publication_date":datetime.now().strftime("%Y-%m-%d %H:%M:%S.%f")})
+
+        #write meta data file
+        file_name = "{}.meta.json".format(p.table_name)
+        meta_file = os.path.join(job.dump_dir,file_name)
+        with open(meta_file,"wb") as output:
+            json.dump(meta_data, output, indent=4)
+
+        job.metadict['meta'] = {"file":"{}{}".format(BorgConfiguration.MASTER_PATH_PREFIX, meta_file),"md5":file_md5(meta_file)}
 
         return (HarvestStateOutcome.succeed,None)
 
@@ -643,38 +575,10 @@ class SubmitToVersionControl(HarvestState):
 
         #import ipdb;ipdb.set_trace()
         # Write JSON output file
-        job.metadict["name"] = p.table_name
         job.metadict["job_id"] = job.id
         job.metadict["job_batch_id"] = job.batch_id
-        job.metadict["schema"] = p.workspace.publish_schema
-        job.metadict["data_schema"] = p.workspace.publish_data_schema
-        job.metadict["outdated_schema"] = p.workspace.publish_outdated_schema
-        job.metadict["workspace"] = p.workspace.name
-        job.metadict["channel"] = p.workspace.publish_channel.name
-        job.metadict["spatial_data"] = SpatialTable.check_spatial(job.publish.spatial_type)
-        job.metadict["spatial_type"] = SpatialTable.get_spatial_type_desc(job.publish.spatial_type)
-        job.metadict["sync_postgres_data"] = p.workspace.publish_channel.sync_postgres_data
-        job.metadict["sync_geoserver_data"] = p.workspace.publish_channel.sync_geoserver_data
-        job.metadict["preview_path"] = "{}{}".format(BorgConfiguration.MASTER_PATH_PREFIX, settings.PREVIEW_ROOT)
-        job.metadict["applications"] = ["{0}:{1}".format(o.application,o.order) for o in Application_Layers.objects.filter(publish=p)]
-        job.metadict["title"] = p.title
-        job.metadict["abstract"] = p.abstract
-        job.metadict["auth_level"] = p.workspace.auth_level
+        job.metadict["action"] = "publish"
         job.metadict["publish_time"] = timezone.localtime(timezone.now()).strftime("%Y-%m-%d %H:%M:%S.%f")
-
-        if p.geoserver_setting:
-            job.metadict["geoserver_setting"] = json.loads(p.geoserver_setting)
-
-        job.metadict["default_style"] = p.default_style.name if p.default_style else None
-
-        #bbox
-        if SpatialTable.check_spatial(job.publish.spatial_type):
-            cursor=connection.cursor()
-            st = SpatialTable.get_instance(cursor,p.workspace.schema,p.table_name,True)
-            if st.geometry_columns:
-                job.metadict["bbox"] = st.geometry_columns[0][2]
-            elif st.geography_columns:
-                job.metadict["bbox"] = st.geography_columns[0][2]
 
         file_name = p.output_filename_abs('publish')
         #create the dir if required

@@ -17,6 +17,7 @@ import xml.etree.ElementTree as ET
 from functools import wraps
 from datetime import datetime, timedelta
 from xml.dom import minidom
+import requests
 
 from django.db import models, connection,transaction,connections
 from django.db.utils import load_backend, DEFAULT_DB_ALIAS
@@ -542,28 +543,28 @@ class Input(JobFields,SignalEnable):
             self._datasource = None
         return self._datasource
 
-    _style_file = 'N/A'
-    @property
-    def style_file(self):
+    _style_file = {"sld":'N/A',"qml":"N/A","lyr":"N/A"}
+    def style_file(self,style_format="sld"):
         """
         Return the style file
         if data source is not a shape file or style file does not exist, return None
         """
         #import ipdb;ipdb.set_trace()
-        if self._style_file == 'N/A':
+        if self._style_file[style_format] == 'N/A':
             if self.datasource:
                 #datasource has valid value
                 if self.datasource[0].lower().endswith(".shp"):
                     #datasource is a shape file
-                    f = self.datasource[0][:-4]+".sld"
+                    f = "{}.{}".format(self.datasource[0][:-4],style_format)
                     if os.path.exists(f):
                         #sld file exists
-                        self._style_file = f
+                        self._style_file[style_format] = f
                     else:
                         #sld file not exists
-                        self._style_file = None
-        if self._style_file and self._style_file != "N/A":
-            return self._style_file
+                        self._style_file[style_format] = None
+
+        if self._style_file[style_format] != "N/A":
+            return self._style_file[style_format]
         else:
             return None
 
@@ -1718,6 +1719,11 @@ class PublishChannel(BorgModel,SignalEnable):
     name = models.SlugField(max_length=255, unique=True, help_text="Name of publish destination", validators=[validate_slug])
     sync_postgres_data = models.BooleanField(default=True)
     sync_geoserver_data = models.BooleanField(default=True)
+    wfs_version = models.CharField(max_length=32, null=True,blank=True)
+    wfs_endpoint = models.CharField(max_length=256, null=True,blank=True)
+    wms_version = models.CharField(max_length=32, null=True,blank=True)
+    wms_endpoint = models.CharField(max_length=256, null=True,blank=True)
+    gwc_endpoint = models.CharField(max_length=256, null=True,blank=True)
     last_modify_time = models.DateTimeField(auto_now=False,auto_now_add=True,editable=False,default=timezone.now,null=False)
 
     def delete(self,using=None):
@@ -1733,7 +1739,9 @@ class PublishChannel(BorgModel,SignalEnable):
             super(PublishChannel,self).delete(using)
 
     def clean(self):
-        import ipdb;ipdb.set_trace()
+        if self.sync_geoserver_data:
+            if not self.wfs_version or not self.wfs_endpoint or not self.wms_version or not self.wms_endpoint or not self.gwc_endpoint:
+                raise ValidationError("Please input wfs, wms and gwc related information.")
         self.last_modify_time = timezone.now()
 
 
@@ -1832,16 +1840,6 @@ class Workspace(BorgModel,SignalEnable):
 
     def output_filename_abs(self,action='publish'):
         return os.path.join(BorgConfiguration.BORG_STATE_REPOSITORY, self.output_filename(action))
-
-    def is_up_to_date(self,job=None,enforce=False):
-        """
-        Returns PublishAction object.
-        """
-        #import ipdb;ipdb.set_trace();
-        if self.publish_status != ResourceStatus.Enabled:
-            return None
-
-        publish_action = self.publish_action
 
     def publish(self):
         try_set_push_owner("workspace")
@@ -1974,7 +1972,6 @@ class Publish(Transform,ResourceStatusManagement,SignalEnable):
     priority = models.PositiveIntegerField(default=1000)
     default_style = models.ForeignKey('Style',null=True,on_delete=models.SET_NULL,related_name="+")
     create_table_sql = SQLField(null=True, editable=False)
-    applications = models.TextField(blank=True,null=True,editable=False)
     geoserver_setting = models.TextField(blank=True,null=True,editable=False)
     pending_actions = models.IntegerField(blank=True,null=True,editable=False)
 
@@ -2023,14 +2020,13 @@ class Publish(Transform,ResourceStatusManagement,SignalEnable):
         from tablemanager.publish_action import PublishAction
         return PublishAction(self.pending_actions)
 
-    @property
-    def builtin_style_file(self):
+    def builtin_style_file(self,style_format="sld"):
         if SpatialTable.check_normal(self.spatial_type):
             #is a normal table, no style file
             return None
-        elif self.input_table and self.input_table.spatial_type == self.spatial_type  and self.input_table.style_file:
+        elif self.input_table and self.input_table.spatial_type == self.spatial_type  and self.input_table.style_file(style_format):
             #publish's input_table has style file, use it
-            return self.input_table.style_file
+            return self.input_table.style_file(style_format)
 
         return None
 
@@ -2232,6 +2228,10 @@ class Publish(Transform,ResourceStatusManagement,SignalEnable):
          so that slave nodes will remove the layer/table from their index
          return True if layres is removed for repository; return false, if layers does not existed in repository.
         """
+        #remove it from catalogue service
+        res = requests.delete("{}/catalogue/api/records/{}:{}/".format(settings.CSW_URL,self.workspace.name,self.table_name),auth=(settings.CSW_USER,settings.CSW_PASSWORD))
+        res.raise_for_status()
+
         #get all possible files
         files =[self.output_filename_abs(action) for action in ['publish','meta','empty_gwc'] ]
         #get all existing files.
@@ -2275,7 +2275,6 @@ class Publish(Transform,ResourceStatusManagement,SignalEnable):
         self._post_execute(cursor)
 
     def publish_meta_data(self):
-        from application.models import Application_Layers
         if self.publish_status != ResourceStatus.Enabled:
             raise ValidationError("The publish({0}) is disabled".format(self.name))
 
@@ -2290,40 +2289,24 @@ class Publish(Transform,ResourceStatusManagement,SignalEnable):
         try_set_push_owner("publish")
         hg = None
         try:
-            json_file = self.output_filename_abs('meta')
-
-            # Write JSON output file
-            json_out = {}
-            json_out["name"] = self.table_name
-            json_out["workspace"] = self.workspace.name
-            json_out["schema"] = self.workspace.publish_schema
-            json_out["channel"] = self.workspace.publish_channel.name
-            json_out["spatial_data"] = SpatialTable.check_spatial(self.spatial_type)
-            json_out["sync_postgres_data"] = False
-            json_out["sync_geoserver_data"] = True
-            json_out["applications"] = ["{0}:{1}".format(o.application,o.order) for o in Application_Layers.objects.filter(publish=self)]
-            json_out["title"] = self.title
-            json_out["action"] = 'meta'
-            json_out["abstract"] = self.abstract
-            json_out["publish_time"] = timezone.localtime(timezone.now()).strftime("%Y-%m-%d %H:%M:%S.%f")
-            json_out["auth_level"] = self.workspace.auth_level
-
-            if self.geoserver_setting:
-                json_out["geoserver_setting"] = json.loads(self.geoserver_setting)
-
-            #prepare publish styles.
-            json_out["default_style"] = self.default_style.name if self.default_style else None
-            json_out["styles"] = {}
-
             if self.workspace.workspace_as_schema:
                 style_file_folder = os.path.join(BorgConfiguration.STYLE_FILE_DUMP_DIR,self.workspace.publish_channel.name, self.workspace.name)
             else:
                 style_file_folder = os.path.join(BorgConfiguration.STYLE_FILE_DUMP_DIR,self.workspace.publish_channel.name)
+            meta_data = self.update_catalogue_service(style_dump_dir=style_file_folder,md5=True)
 
-            for style in self.style_set.filter(status=ResourceStatus.Enabled.name):
-                dump_file = style.dump(style_file_folder)
-                json_out["styles"][style.name] = {"file":"{}{}".format(BorgConfiguration.MASTER_PATH_PREFIX,dump_file),"md5":file_md5(dump_file)}
+            #write meta data file
+            file_name = "{}.meta.json".format(self.table_name)
+            meta_file = os.path.join(style_file_folder,file_name)
+            with open(meta_file,"wb") as output:
+                json.dump(meta_data, output, indent=4)
 
+            json_out = {}
+            json_out["action"] = 'meta'
+            json_out["publish_time"] = timezone.localtime(timezone.now()).strftime("%Y-%m-%d %H:%M:%S.%f")
+            json_out['meta'] = {"file":"{}{}".format(BorgConfiguration.MASTER_PATH_PREFIX, meta_file),"md5":file_md5(meta_file)}
+
+            json_file = self.output_filename_abs('meta')
             #create the dir if required
             if not os.path.exists(os.path.dirname(json_file)):
                 os.makedirs(os.path.dirname(json_file))
@@ -2394,11 +2377,11 @@ class Publish(Transform,ResourceStatusManagement,SignalEnable):
 
     @property
     def title(self):
-        return self.kmi_title if self.kmi_title else (self.input_table.title if self.input_table else "")
+        return self.input_table.title if self.input_table else ""
 
     @property
     def abstract(self):
-        return self.kmi_abstract if self.kmi_abstract else (self.input_table.kmi_abstract if self.input_table else "")
+        return self.input_table.kmi_abstract if self.input_table else ""
 
     def output_filename(self,action='publish'):
         if action == 'publish':
@@ -2409,6 +2392,155 @@ class Publish(Transform,ResourceStatusManagement,SignalEnable):
     def output_filename_abs(self,action='publish'):
         return os.path.join(BorgConfiguration.BORG_STATE_REPOSITORY, self.output_filename(action))
 
+    _style_name_re = re.compile("<se:Name>(?P<layer>.*?)</se:Name>")
+    _property_re = re.compile("<ogc:PropertyName>(?P<property>.*?)</ogc:PropertyName>")
+    def format_sld_style(self,sld):
+        """
+        reset <se:Name> based on publish name.
+        """
+        try:
+            sld = minidom.parseString(sld).toprettyxml(indent="    ")
+            sld = [line for line in sld.splitlines() if line.strip()]
+        except:
+            raise ValidationError("Incorrect xml format.{}".format(traceback.format_exc()))
+        
+        sld = os.linesep.join(sld)
+    
+        #do some transformation.
+        sld = self._style_name_re.sub("<se:Name>{}</se:Name>".format(self.table_name),sld,2)
+        sld = self._property_re.sub((lambda m: "<ogc:PropertyName>{}</ogc:PropertyName>".format(m.group(1).lower())), sld)
+
+        return sld
+
+    @property
+    def builtin_metadata(self):
+        meta_data = {}
+        meta_data["workspace"] = self.workspace.name
+        meta_data["name"] = self.table_name
+        if SpatialTable.check_normal(self.spatial_type) or not self.workspace.publish_channel.sync_geoserver_data:
+            meta_data["service_type"] = ""
+        elif SpatialTable.check_raster(self.spatial_type):
+            meta_data["service_type"] = "WMS"
+            meta_data["service_type_version"] = self.workspace.publish_channel.wms_version
+        else:
+            meta_data["service_type"] = "WFS"
+            meta_data["service_type_version"] = self.workspace.publish_channel.wfs_version
+
+        meta_data["title"] = self.title
+        meta_data["abstract"] = self.abstract
+
+        modify_time = None
+        if self.input_table:
+            for ds in self.input_table.datasource:
+                if os.path.exists(ds):
+                    input_modify_time = datetime.utcfromtimestamp(os.path.getmtime(ds)).replace(tzinfo=pytz.UTC)
+                    if modify_time:
+                        if modify_time < input_modify_time:
+                            modify_time = input_modify_time
+                    else:
+                        modify_time = input_modify_time
+                else:
+                    modify_time = self.last_modify_time
+        else:
+            modify_time = self.last_modify_time
+        meta_data["modified"] = modify_time.astimezone(timezone.get_default_timezone()).strftime("%Y-%m-%d %H:%M:%S.%f")
+
+        #bbox
+        if SpatialTable.check_spatial(self.spatial_type):
+            cursor=connection.cursor()
+            st = SpatialTable.get_instance(cursor,self.workspace.schema,self.table_name,bbox=True,crs=True)
+            if st.geometry_columns:
+                meta_data["bounding_box"] = st.geometry_columns[0][2]
+                meta_data["crs"] = st.geometry_columns[0][3]
+            elif st.geography_columns:
+                meta_data["bounding_box"] = st.geography_columns[0][2]
+                meta_data["crs"] = st.geography_columns[0][3]
+        meta_data["styles"] = []
+        for style_format in ["sld","qml","lyr"]:
+            f = self.builtin_style_file(style_format)
+            if f:
+                with open(f,"r") as r:
+                    meta_data["styles"].append({"content":(self.format_sld_style(r.read()) if style_format == "sld" else r.read()).encode("base64"),"format":style_format.upper()})
+
+        #OWS info
+        meta_data["ows_resource"] = {}
+        if meta_data["service_type"] == "WFS" and self.workspace.publish_channel.wfs_endpoint:
+            meta_data["ows_resource"]["wfs"] = True
+            meta_data["ows_resource"]["wfs_version"] = self.workspace.publish_channel.wfs_version
+            meta_data["ows_resource"]["wfs_endpoint"] = self.workspace.publish_channel.wfs_endpoint
+
+        if meta_data["service_type"] in ("WFS","WMS") and self.workspace.publish_channel.wfs_endpoint:
+            meta_data["ows_resource"]["wms"] = True
+            meta_data["ows_resource"]["wms_version"] = self.workspace.publish_channel.wms_version
+            meta_data["ows_resource"]["wms_endpoint"] = self.workspace.publish_channel.wms_endpoint
+
+            geo_settings = json.loads(self.geoserver_setting) if self.geoserver_setting else {}
+            if geo_settings.get("create_cache_layer",False) and self.workspace.publish_channel.gwc_endpoint:
+                meta_data["ows_resource"]["gwc"] = True
+                meta_data["ows_resource"]["gwc_endpoint"] = self.workspace.publish_channel.gwc_endpoint
+
+
+
+        return meta_data
+
+    def update_catalogue_service(self,style_dump_dir=None,md5=False,extra_datas=None):
+        meta_data = self.builtin_metadata
+        if extra_datas:
+            meta_data.update(extra_datas)
+        bbox = meta_data.get("bounding_box",None)
+        crs = meta_data.get("crs",None)
+        #update catalog service
+        res = requests.post("{}/catalogue/api/records/".format(settings.CSW_URL),json=meta_data,auth=(settings.CSW_USER,settings.CSW_PASSWORD))
+        res.raise_for_status()
+        meta_data = res.json()
+        #process styles
+        styles = meta_data.get("styles",[])
+        #filter out qml and lyr styles
+        sld_styles = [s for s in meta_data.get("styles",[]) if s["format"].lower() == "sld"]
+        meta_data["styles"] = sld_styles
+        if style_dump_dir:
+            meta_data["styles"] = {}
+
+        for style in sld_styles:
+            if style["default"]:
+                #default sld file
+                meta_data["default_style"] = style["name"]
+            if style_dump_dir:
+                #write the style into file system
+                style_file = os.path.join(style_dump_dir,"{}.{}.sld".format(self.table_name,style["name"]))
+                with open(style_file,"wb") as f:
+                    f.write(style["raw_content"].decode("base64"))
+                if md5:
+                    meta_data["styles"][style["name"]] = {"file":"{}{}".format(BorgConfiguration.MASTER_PATH_PREFIX, style_file),"default":style["default"],"md5":file_md5(style_file)}
+                else:
+                    meta_data["styles"][style["name"]] = {"file":"{}{}".format(BorgConfiguration.MASTER_PATH_PREFIX, style_file),"default":style["default"]}
+
+        #add extra data to meta data
+        meta_data["workspace"] = self.workspace.name
+        meta_data["name"] = self.table_name
+        meta_data["schema"] = self.workspace.publish_schema
+        meta_data["data_schema"] = self.workspace.publish_data_schema
+        meta_data["outdated_schema"] = self.workspace.publish_outdated_schema
+        meta_data["channel"] = self.workspace.publish_channel.name
+        meta_data["spatial_data"] = SpatialTable.check_spatial(self.spatial_type)
+        meta_data["spatial_type"] = SpatialTable.get_spatial_type_desc(self.spatial_type)
+        meta_data["sync_postgres_data"] = self.workspace.publish_channel.sync_postgres_data
+        meta_data["sync_geoserver_data"] = self.workspace.publish_channel.sync_geoserver_data
+        meta_data["preview_path"] = "{}{}".format(BorgConfiguration.MASTER_PATH_PREFIX, settings.PREVIEW_ROOT)
+        meta_data["auth_level"] = self.workspace.auth_level
+
+        if self.geoserver_setting:
+            meta_data["geoserver_setting"] = json.loads(self.geoserver_setting)
+                
+        #bbox
+        if "bounding_box" in meta_data:
+            del meta_data["bounding_box"]
+        if SpatialTable.check_spatial(self.spatial_type):
+            meta_data["bbox"] = bbox
+            meta_data["crs"] = crs
+
+        return meta_data
+
     def is_up_to_date(self,job=None,enforce=False):
         """
         Returns PublishAction object.
@@ -2418,9 +2550,6 @@ class Publish(Transform,ResourceStatusManagement,SignalEnable):
             return None
 
         publish_action = self.publish_action
-
-        if not self.job_run_time:
-            return publish_action.publish_all
 
         if publish_action.publish_all or publish_action.publish_data:
             return publish_action
@@ -2526,15 +2655,6 @@ class PublishEventListener(object):
                 instance.set_relation(pos,relation)
             pos += 1
 
-        #load the built-in style for new spatial publish object
-        if not instance.pk and SpatialTable.check_spatial(instance.spatial_type):
-            builtin_style_file = instance.builtin_style_file
-            if builtin_style_file:
-                builtin_style = None
-                with open(builtin_style_file) as f:
-                    builtin_style = f.read()
-                instance.default_style = Style(name="builtin",description=builtin_style_file,sld=builtin_style,status=ResourceStatus.Enabled.name,publish=instance,last_modify_time=timezone.now())
-
     @staticmethod
     @receiver(post_save, sender=Publish)
     def _post_save(sender, instance, **args):
@@ -2554,18 +2674,6 @@ class PublishEventListener(object):
                 relation.save()
 
         if (hasattr(instance,"new_object") and getattr(instance,"new_object")):
-            builtin_style_file = instance.builtin_style_file
-            if builtin_style_file:
-                #load builtin style
-                builtin_style = None
-                with open(builtin_style_file) as f:
-                    builtin_style = f.read()
-                builtin_style = Style(name="builtin",description=builtin_style_file,sld=builtin_style,status=ResourceStatus.Enabled.name,publish=instance,last_modify_time=timezone.now())
-
-                builtin_style.publish = instance
-                builtin_style.set_default_style = True
-                builtin_style.save()
-
             delattr(instance,"new_object")
             refresh_select_choices.send(instance,choice_family="publish")
 
@@ -2624,7 +2732,6 @@ class Style(BorgModel,ResourceStatusManagement):
 
     _style_name_re = re.compile("<se:Name>(?P<layer>.*?)</se:Name>")
     _property_re = re.compile("<ogc:PropertyName>(?P<property>.*?)</ogc:PropertyName>")
-    _sld_root_parse_re = re.compile("(<[a-zA-Z0-9]+>?)|([a-zA-Z:0-9]+=\"[a-zA-Z0-9:/\. ]+\">?)")
 
     def __init__(self,*args,**kwargs):
         super(Style,self).__init__(*args,**kwargs)
@@ -2665,17 +2772,6 @@ class Style(BorgModel,ResourceStatusManagement):
         except:
             raise ValidationError("Incorrect xml format.{}".format(traceback.format_exc()))
         
-        #format the StyledLayerDescriptor line because it is too long
-        """
-        line_elements = self._sld_root_parse_re.findall(sld[1])
-        if len(line_elements) > 1:
-            del sld[1]
-            index = 1
-            sld.insert(index,"{} {}".format(line_elements[0][0],line_elements[1][1]))
-            for element in line_elements[2:]:
-                index += 1
-                sld.insert(index,(" " * len(line_elements[0][0]) + " {}").format(element[1]))
-        """
         sld = os.linesep.join(sld)
     
         if sld and self.publish:
@@ -2719,20 +2815,6 @@ class Style(BorgModel,ResourceStatusManagement):
     class Meta:
         unique_together = (("publish","name"))
         ordering = ("publish","name")
-
-class StyleEventListener(object):
-    @staticmethod
-    @receiver(post_save, sender=Style)
-    def _post_save(sender, instance, **args):
-        if hasattr(instance,'set_default_style'):
-            if instance.set_default_style:
-                instance.publish.default_style = instance
-                instance.publish.last_modify_time = timezone.now()
-                instance.publish.save(update_fields=["default_style","last_modify_time"])
-            elif instance.publish.default_style == instance:
-                instance.publish.default_style = None
-                instance.publish.last_modify_time = timezone.now()
-                instance.publish.save(update_fields=["default_style","last_modify_time"])
 
 class Replica(models.Model):
     """

@@ -8,12 +8,14 @@ import urllib
 import traceback
 from xml.etree import ElementTree
 from xml.dom import minidom
+from datetime import datetime
 
 
 from django.db import transaction
 from django.db import models
 from django.utils import timezone
 from django.utils.six import with_metaclass
+from django.conf import settings
 from django.utils import timezone
 from django.dispatch import receiver
 from django.db.models.signals import pre_save, pre_delete,post_save,post_delete
@@ -22,6 +24,7 @@ from django.core.validators import RegexValidator
 
 from tablemanager.models import Workspace
 from borg_utils.borg_config import BorgConfiguration
+from borg_utils.utils import file_md5
 from borg_utils.signals import refresh_select_choices,inherit_support_receiver
 from borg_utils.resource_status import ResourceStatus,ResourceStatusManagement,ResourceAction
 from borg_utils.signal_enable import SignalEnable
@@ -112,7 +115,6 @@ class WmsServer(models.Model,ResourceStatusManagement,SignalEnable):
         else:
             res = requests.get(self.get_capability_url, verify=False)
         res.raise_for_status()
-        #import ipdb;ipdb.set_trace()
         xml_data = res.text.encode('utf-8')
         root = ElementTree.fromstring(xml_data)
         first_level_layer = root.find("Capability/Layer")
@@ -146,7 +148,15 @@ class WmsServer(models.Model,ResourceStatusManagement,SignalEnable):
         if layer_name_element is not None:
             #import ipdb;ipdb.set_trace()
             layer_name = layer_name_element.text
+            kmi_name = layer_name.replace(":","_").replace(" ","_")
             layer_abstract_element = layer.find("Abstract")
+            boundingbox_element = layer.find("BoundingBox")
+            crs = None
+            bbox = None
+            if boundingbox_element is not None:
+                crs = boundingbox_element.get("SRS",None)
+                bbox = "[{},{},{},{}]".format(boundingbox_element.get("minx",None),boundingbox_element.get("miny",None),boundingbox_element.get("maxx",None),boundingbox_element.get("maxy",None))
+
             try:
                 existed_layer = WmsLayer.objects.get(server = self,name=layer_name)
             except ObjectDoesNotExist:
@@ -167,7 +177,15 @@ class WmsServer(models.Model,ResourceStatusManagement,SignalEnable):
                     if existed_layer.abstract and not existed_layer.kmi_abstract:
                         changed = True
                     existed_layer.abstract = None
-    
+                
+                if existed_layer.crs != crs:
+                    existed_layer.crs = crs
+                    changed = True
+
+                if existed_layer.bbox != bbox:
+                    existed_layer.bbox = bbox
+                    changed = True
+
                 if changed:                
                     existed_layer.status = existed_layer.next_status(ResourceAction.UPDATE)
 
@@ -180,6 +198,7 @@ class WmsServer(models.Model,ResourceStatusManagement,SignalEnable):
                 #layer not exist
                 existed_layer = WmsLayer(server = self,
                                         name=layer_name,
+                                        kmi_name=kmi_name,
                                         title=layer_title_element.text,
                                         path=path,
                                         abstract=layer_abstract_element.text if layer_abstract_element is not None else None,
@@ -188,6 +207,8 @@ class WmsServer(models.Model,ResourceStatusManagement,SignalEnable):
                                         last_publish_time=None,
                                         last_unpublish_time=None,
                                         last_modify_time=None,
+                                        crs=crs,
+                                        bbox=bbox,
                                         last_refresh_time=process_time)
                 existed_layer.save()
 
@@ -267,22 +288,35 @@ class WmsServer(models.Model,ResourceStatusManagement,SignalEnable):
         """
          publish store's json reference (if exists) to the repository,
         """
-        json_filename = self.json_filename_abs('publish');
-
         try_set_push_owner("wmsserver")
         hg = None
         try:
-            json_out = {}
-            json_out["name"] = self.name
-            json_out["capability_url"] = self.get_capability_url
-            json_out["username"] = self.user or ""
-            json_out["password"] = self.password or ""
-            json_out["workspace"] = self.workspace.name
-            json_out["publish_time"] = timezone.localtime(timezone.now()).strftime("%Y-%m-%d %H:%M:%S.%f")
+            meta_data = {}
+            meta_data["name"] = self.name
+            meta_data["capability_url"] = self.get_capability_url
+            meta_data["username"] = self.user or ""
+            meta_data["password"] = self.password or ""
+            meta_data["workspace"] = self.workspace.name
         
             if self.geoserver_setting:
-                json_out["geoserver_setting"] = json.loads(self.geoserver_setting)
+                meta_data["geoserver_setting"] = json.loads(self.geoserver_setting)
+
+            #write meta data file
+            file_name = "{}.{}.meta.json".format(self.workspace.name,self.name)
+            meta_file = os.path.join(BorgConfiguration.WMS_STORE_DIR,file_name)
+            #create the dir if required
+            if not os.path.exists(os.path.dirname(meta_file)):
+                os.makedirs(os.path.dirname(meta_file))
+
+            with open(meta_file,"wb") as output:
+                json.dump(meta_data, output, indent=4)
+
+            json_out = {}
+            json_out['meta'] = {"file":"{}{}".format(BorgConfiguration.MASTER_PATH_PREFIX, meta_file),"md5":file_md5(meta_file)}
+            json_out['action'] = 'publish'
+            json_out["publish_time"] = timezone.localtime(timezone.now()).strftime("%Y-%m-%d %H:%M:%S.%f")
         
+            json_filename = self.json_filename_abs('publish');
             #create the dir if required
             if not os.path.exists(os.path.dirname(json_filename)):
                 os.makedirs(os.path.dirname(json_filename))
@@ -305,9 +339,11 @@ class WmsServer(models.Model,ResourceStatusManagement,SignalEnable):
 class WmsLayer(models.Model,ResourceStatusManagement,SignalEnable):
     name = models.CharField(max_length=128,null=False,editable=True, help_text="The name of wms layer")
     server = models.ForeignKey(WmsServer, null=False,editable=False)
+    crs = models.CharField(max_length=64,null=True,editable=False)
+    bbox = models.CharField(max_length=128,null=True,editable=False)
     title = models.CharField(max_length=512,null=True,editable=False)
     abstract = models.TextField(null=True,editable=False)
-    kmi_name = models.SlugField(max_length=128,null=True,editable=True,blank=True, validators=[validate_slug])
+    kmi_name = models.SlugField(max_length=128,null=False,editable=True,blank=False, validators=[validate_slug])
     kmi_title = models.CharField(max_length=512,null=True,editable=True,blank=True)
     kmi_abstract = models.TextField(null=True,editable=True,blank=True)
     path = models.CharField(max_length=512,null=True,editable=False)
@@ -320,10 +356,6 @@ class WmsLayer(models.Model,ResourceStatusManagement,SignalEnable):
     last_modify_time = models.DateTimeField(null=True,editable=False)
 
 
-    @property
-    def layer_name(self):
-        return self.kmi_name or self.name.replace(":","_").replace(" ","_")
- 
     @property
     def layer_title(self):
         return self.kmi_title or self.title
@@ -364,6 +396,66 @@ class WmsLayer(models.Model,ResourceStatusManagement,SignalEnable):
         if self.pk:
             self.last_modify_time = timezone.now()
 
+    @property
+    def builtin_metadata(self):
+        meta_data = {}
+        meta_data["workspace"] = self.server.workspace.name
+        meta_data["name"] = self.kmi_name
+        meta_data["service_type"] = "WMS"
+        meta_data["service_type_version"] = self.server.workspace.publish_channel.wms_version
+        meta_data["title"] = self.title
+        meta_data["abstract"] = self.abstract
+        meta_data["modified"] = (self.last_modify_time or self.last_refresh_time).astimezone(timezone.get_default_timezone()).strftime("%Y-%m-%d %H:%M:%S.%f")
+
+        #bbox
+        meta_data["bounding_box"] = self.bbox or None
+        meta_data["crs"] = self.crs or None
+
+        #ows resource
+        meta_data["ows_resource"] = {}
+        if self.server.workspace.publish_channel.wms_endpoint:
+            meta_data["ows_resource"]["wms"] = True
+            meta_data["ows_resource"]["wms_version"] = self.server.workspace.publish_channel.wms_version
+            meta_data["ows_resource"]["wms_endpoint"] = self.server.workspace.publish_channel.wms_endpoint
+
+        geo_settings = json.loads(self.geoserver_setting) if self.geoserver_setting else {}
+        if geo_settings.get("create_cache_layer",False) and self.server.workspace.publish_channel.gwc_endpoint:
+            meta_data["ows_resource"]["gwc"] = True
+            meta_data["ows_resource"]["gwc_endpoint"] = self.server.workspace.publish_channel.gwc_endpoint
+        return meta_data
+
+    def update_catalogue_service(self,extra_datas=None):
+        meta_data = self.builtin_metadata
+        if extra_datas:
+            meta_data.update(extra_datas)
+        bbox = meta_data.get("bounding_box",None)
+        crs = meta_data.get("crs",None)
+        #update catalog service
+        res = requests.post("{}/catalogue/api/records/".format(settings.CSW_URL),json=meta_data,auth=(settings.CSW_USER,settings.CSW_PASSWORD))
+        res.raise_for_status()
+        meta_data = res.json()
+
+        #add extra data to meta data
+        meta_data["workspace"] = self.server.workspace.name
+        meta_data["name"] = self.kmi_name
+        meta_data["native_name"] = self.name
+        meta_data["store"] = self.server.name
+        meta_data["auth_level"] = self.server.workspace.auth_level
+
+        meta_data["channel"] = self.server.workspace.publish_channel.name
+        meta_data["sync_geoserver_data"] = self.server.workspace.publish_channel.sync_geoserver_data
+
+        if self.geoserver_setting:
+            meta_data["geoserver_setting"] = json.loads(self.geoserver_setting)
+                
+        #bbox
+        if "bounding_box" in meta_data:
+            del meta_data["bounding_box"]
+        meta_data["bbox"] = bbox
+        meta_data["crs"] = crs
+
+        return meta_data
+
     def save(self, force_insert=False, force_update=False, using=None, update_fields=None):
         try:
             if self.try_set_signal_sender("wmslayer_save"):
@@ -399,6 +491,10 @@ class WmsLayer(models.Model,ResourceStatusManagement,SignalEnable):
          remove store's json reference (if exists) from the repository,
          return True if store is removed for repository; return false, if layers does not existed in repository.
         """
+        #remove it from catalogue service
+        res = requests.delete("{}/catalogue/api/records/{}:{}/".format(settings.CSW_URL,self.server.workspace.name,self.kmi_name),auth=(settings.CSW_USER,settings.CSW_PASSWORD))
+        res.raise_for_status()
+
         json_files = [ self.json_filename_abs(action) for action in [ 'publish','empty_gwc' ] ]
         #get all existing files.
         json_files = [ f for f in json_files if os.path.exists(f) ]
@@ -428,20 +524,22 @@ class WmsLayer(models.Model,ResourceStatusManagement,SignalEnable):
         try_set_push_owner("wmslayer")
         hg = None
         try:
+            meta_data = self.update_catalogue_service(extra_datas={"publication_date":datetime.now().strftime("%Y-%m-%d %H:%M:%S.%f")})
+
+            #write meta data file
+            file_name = "{}.{}.meta.json".format(self.server.workspace.name,self.kmi_name)
+            meta_file = os.path.join(BorgConfiguration.WMS_LAYER_DIR,file_name)
+            #create the dir if required
+            if not os.path.exists(os.path.dirname(meta_file)):
+                os.makedirs(os.path.dirname(meta_file))
+
+            with open(meta_file,"wb") as output:
+                json.dump(meta_data, output, indent=4)
+
             json_out = {}
-            json_out["name"] = self.layer_name
-            json_out["native_name"] = self.name
-            json_out["title"] = self.layer_title
-            json_out["abstract"] = self.layer_abstract
-            json_out["workspace"] = self.server.workspace.name
-            json_out["store"] = self.server.name
+            json_out['meta'] = {"file":"{}{}".format(BorgConfiguration.MASTER_PATH_PREFIX, meta_file),"md5":file_md5(meta_file)}
+            json_out['action'] = "publish"
             json_out["publish_time"] = timezone.localtime(timezone.now()).strftime("%Y-%m-%d %H:%M:%S.%f")
-
-            from application.models import Application_Layers
-            json_out["applications"] = ["{0}:{1}".format(o.application,o.order) for o in Application_Layers.objects.filter(wmslayer=self)]
-
-            if self.geoserver_setting:
-                json_out["geoserver_setting"] = json.loads(self.geoserver_setting)
         
             #create the dir if required
             if not os.path.exists(os.path.dirname(json_filename)):
@@ -481,7 +579,7 @@ class WmsLayer(models.Model,ResourceStatusManagement,SignalEnable):
         hg = None
         try:
             json_out = {}
-            json_out["name"] = self.layer_name
+            json_out["name"] = self.kmi_name
             json_out["workspace"] = self.server.workspace.name
             json_out["store"] = self.server.name
             json_out["action"] = "empty_gwc"
@@ -556,7 +654,7 @@ class WmsServerEventListener(object):
             for layer in instance.wmslayer_set.all():
                 target_status = layer.next_status(ResourceAction.CASCADE_PUBLISH)
                 if layer.status != target_status or layer.publish_required:
-                    #need to unpublish
+                    #need to publish
                     layer.status = target_status
                     layer.save(update_fields=["status","last_publish_time"])
 

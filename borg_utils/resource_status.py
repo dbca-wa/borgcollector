@@ -220,7 +220,7 @@ class CascadePublished(ResourceStatus):
         elif action == ResourceAction.PUBLISH:
             return (self.Published,True)
         elif action == ResourceAction.CASCADE_PUBLISH:
-            return (self.CascadePublished,True)
+            return (self.CascadePublished,False)
         elif action == ResourceAction.UNPUBLISH:
             return (self.Unpublished,True)
         elif action == ResourceAction.CASCADE_UNPUBLISH:
