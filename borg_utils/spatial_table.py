@@ -11,11 +11,11 @@ class SpatialTable(object):
     _get_geography_columns_sql = "SELECT f_geography_column,type  FROM public.geography_columns WHERE f_table_catalog = '{0}' AND f_table_schema = '{1}' AND f_table_name = '{2}'"
     _get_raster_columns_sql = "SELECT r_raster_column  FROM public.raster_columns WHERE r_table_catalog = '{0}' AND r_table_schema = '{1}' AND r_table_name = '{2}'"
 
-    _check_index_sql = "SELECT COUNT(1) FROM pg_index a JOIN pg_class b ON a.indexrelid = b.oid JOIN pg_class c ON a.indrelid = c.oid JOIN pg_namespace d ON c.relnamespace = d.oid WHERE d.nspname='{0}' AND c.relname='{1}' AND b.relname='{2}'"
+    _check_index_sql = "SELECT COUNT(1) FROM pg_catalog.pg_index a JOIN pg_catalog.pg_class b ON a.indexrelid = b.oid JOIN pg_catalog.pg_class c ON a.indrelid = c.oid JOIN pg_catalog.pg_namespace d ON c.relnamespace = d.oid WHERE d.nspname='{0}' AND c.relname='{1}' AND b.relname='{2}'"
     _create_index_sql = "CREATE INDEX \"{2}\" ON \"{0}\".\"{1}\" USING GIST ({3})"
     _drop_index_sql = "DROP INDEX IF EXISTS \"{0}\".\"{1}\""
 
-    _retrieve_bbox_sql = "SELECT ST_XMIN(a.bbox), ST_YMIN(a.bbox), ST_XMAX(a.bbox), ST_YMAX(a.bbox) FROM (SELECT st_extent(\"{2}\") AS bbox  FROM \"{0}\".\"{1}\") a"
+    _retrieve_bbox_sql = "SELECT public.ST_XMIN(a.bbox), public.ST_YMIN(a.bbox), public.ST_XMAX(a.bbox), public.ST_YMAX(a.bbox) FROM (SELECT public.st_extent(\"{2}\") AS bbox  FROM \"{0}\".\"{1}\") a"
     _retrieve_crs_sql = "SELECT public.ST_SRID({2}) FROM \"{0}\".\"{1}\" LIMIT 1;"
 
     _database = (settings.DATABASES["default"])["NAME"]

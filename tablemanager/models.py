@@ -2230,7 +2230,8 @@ class Publish(Transform,ResourceStatusManagement,SignalEnable):
         """
         #remove it from catalogue service
         res = requests.delete("{}/catalogue/api/records/{}:{}/".format(settings.CSW_URL,self.workspace.name,self.table_name),auth=(settings.CSW_USER,settings.CSW_PASSWORD))
-        res.raise_for_status()
+        if res.status_code != 404:
+            res.raise_for_status()
 
         #get all possible files
         files =[self.output_filename_abs(action) for action in ['publish','meta','empty_gwc'] ]
@@ -2293,7 +2294,7 @@ class Publish(Transform,ResourceStatusManagement,SignalEnable):
                 style_file_folder = os.path.join(BorgConfiguration.STYLE_FILE_DUMP_DIR,self.workspace.publish_channel.name, self.workspace.name)
             else:
                 style_file_folder = os.path.join(BorgConfiguration.STYLE_FILE_DUMP_DIR,self.workspace.publish_channel.name)
-            meta_data = self.update_catalogue_service(style_dump_dir=style_file_folder,md5=True)
+            meta_data = self.update_catalogue_service(style_dump_dir=style_file_folder,md5=True,extra_datas={"publication_date":datetime.now().strftime("%Y-%m-%d %H:%M:%S.%f")})
 
             #write meta data file
             file_name = "{}.meta.json".format(self.table_name)
@@ -2490,7 +2491,7 @@ class Publish(Transform,ResourceStatusManagement,SignalEnable):
         bbox = meta_data.get("bounding_box",None)
         crs = meta_data.get("crs",None)
         #update catalog service
-        res = requests.post("{}/catalogue/api/records/".format(settings.CSW_URL),json=meta_data,auth=(settings.CSW_USER,settings.CSW_PASSWORD))
+        res = requests.post("{}/catalogue/api/records/?style_content=true".format(settings.CSW_URL),json=meta_data,auth=(settings.CSW_USER,settings.CSW_PASSWORD))
         res.raise_for_status()
         meta_data = res.json()
         #process styles
@@ -2500,6 +2501,8 @@ class Publish(Transform,ResourceStatusManagement,SignalEnable):
         meta_data["styles"] = sld_styles
         if style_dump_dir:
             meta_data["styles"] = {}
+            if not os.path.exists(style_dump_dir):
+                os.makedirs(style_dump_dir)
 
         for style in sld_styles:
             if style["default"]:
