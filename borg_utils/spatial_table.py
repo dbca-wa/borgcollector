@@ -140,7 +140,7 @@ class SpatialTable(object):
                     row = sql_result.fetchone()
                 else:
                     row = cursor.fetchone()
-                if row[0]:
+                if any(row):
                     column[2] =  (row[0],row[1],row[2],row[3])
                 
         if self._geography_columns:
