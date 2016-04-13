@@ -493,7 +493,8 @@ class WmsLayer(models.Model,ResourceStatusManagement,SignalEnable):
         """
         #remove it from catalogue service
         res = requests.delete("{}/catalogue/api/records/{}:{}/".format(settings.CSW_URL,self.server.workspace.name,self.kmi_name),auth=(settings.CSW_USER,settings.CSW_PASSWORD))
-        res.raise_for_status()
+        if res.status_code != 404:
+            res.raise_for_status()
 
         json_files = [ self.json_filename_abs(action) for action in [ 'publish','empty_gwc' ] ]
         #get all existing files.
