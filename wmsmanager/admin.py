@@ -198,7 +198,7 @@ class AbstractWmsLayerAdmin(admin.ModelAdmin):
 
     def _server(self,o):
         if o.server:
-            return "<a href='/wmsmanager/wmsserver/{0}'>{1}</a>".format(o.server.pk,o.server.name)
+            return "<a href='/wmsmanager/wmsserver/{0}/'>{1}</a>".format(o.server.pk,o.server.name)
         else:
             return ""
     _server.allow_tags = True

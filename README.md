@@ -89,6 +89,8 @@ Borg Collector needs the following environment variables defined (e.g. .env for 
 ```
 ## Model info
 
+Models are important
+
  - Input tables define ogr2ogr vrt sources from which to import data
  - Publish defines a script to publish an input table with
  - NormalTable is a table definition with constraints of a 'normalised' table

@@ -2475,7 +2475,7 @@ class Publish(Transform,ResourceStatusManagement,SignalEnable):
             meta_data["ows_resource"]["wms_endpoint"] = self.workspace.publish_channel.wms_endpoint
 
             geo_settings = json.loads(self.geoserver_setting) if self.geoserver_setting else {}
-            if geo_settings.get("create_cache_layer",False):
+            if geo_settings.get("create_cache_layer",False) and self.workspace.publish_channel.gwc_endpoint:
                 meta_data["ows_resource"]["gwc"] = True
                 meta_data["ows_resource"]["gwc_endpoint"] = self.workspace.publish_channel.gwc_endpoint
 
