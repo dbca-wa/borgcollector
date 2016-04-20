@@ -53,8 +53,8 @@ from borg_utils.utils import file_md5
 logger = logging.getLogger(__name__)
 
   
-slug_re = re.compile(r'^[a-z0-9_]+$')
-validate_slug = RegexValidator(slug_re, "Slug can only contain lowercase letters, numbers and underscores", "invalid")
+slug_re = re.compile(r'^[a-z_][a-z0-9_]+$')
+validate_slug = RegexValidator(slug_re, "Slug can only start with lowercase letters or underscore, and contain lowercase letters, numbers and underscore", "invalid")
 
 def in_schema(search, db_url=None,input_schema=None,trans_schema=None,normal_schema=None):
     if db_url:
