@@ -32,8 +32,8 @@ from borg_utils.hg_batch_push import try_set_push_owner, try_clear_push_owner, i
 
 logger = logging.getLogger(__name__)
 
-slug_re = re.compile(r'^[a-z0-9_]+$')
-validate_slug = RegexValidator(slug_re, "Slug can only contain lowercase letters, numbers and underscores", "invalid")
+slug_re = re.compile(r'^[a-z_][a-z0-9_]+$')
+validate_slug = RegexValidator(slug_re, "Slug can only start with lowercase letters or underscore, and contain lowercase letters, numbers and underscore", "invalid")
 
 default_layer_geoserver_setting = { 
                    "create_cache_layer": True,
