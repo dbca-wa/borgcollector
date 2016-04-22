@@ -543,13 +543,15 @@ class Input(JobFields,SignalEnable):
             self._datasource = None
         return self._datasource
 
-    _style_file = {"sld":'N/A',"qml":"N/A","lyr":"N/A"}
     def style_file(self,style_format="sld"):
         """
         Return the style file
         if data source is not a shape file or style file does not exist, return None
         """
         #import ipdb;ipdb.set_trace()
+        if not hasattr(self,"_style_file"):
+            self._style_file = {"sld":'N/A',"qml":"N/A","lyr":"N/A"}
+
         if self._style_file[style_format] == 'N/A':
             if self.datasource:
                 #datasource has valid value
