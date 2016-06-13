@@ -1,5 +1,5 @@
 import django.db.models
-from django.core.exceptions import ValidationError
+from django.core.exceptions import ValidationError,NON_FIELD_ERRORS
 
 # Create your models here.
 

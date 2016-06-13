@@ -52,6 +52,12 @@ class HarvestJobCleaner(object):
                 deleted_jobs += 1
                 self.logger.debug("Delete outdated job({0})".format(j.pk))
 
+        outdated_date = timezone.now() - timedelta(7)
+        for j in Job.objects.filter(publish__isnull = True,created__lt = outdated_date):
+            j.delete()
+            deleted_jobs += 1
+            self.logger.debug("Delete outdated job({0})".format(j.pk))
+
         if deleted_jobs == 1:
             self.logger.info("{0} outdated job has been deleted.".format(deleted_jobs))
         elif deleted_jobs > 1:

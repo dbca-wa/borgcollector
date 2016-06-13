@@ -58,14 +58,15 @@ class JobStatemachine(object):
             #publish is disabled, ignore
             return (False,"Disabled")
 
-        if publish.waiting > 0:
+        job = None
+        job = Job.objects.filter(publish=publish,state=Waiting.instance().name).first()
+        if job > 0:
             #already have one waiting harvest job, create another is meanless.
-            return (False,"Already have a waiting job")
+            return (True,job.pk)
 
         if not job_batch_id:
-            job_batch_id = Manually.instance().job_batch_id
+            job_batch_id = job_interval.job_batch_id()
 
-        job = None
         with transaction.atomic():
             if publish.waiting > 0:
                 #already have one waiting harvest job, create another is meanless.

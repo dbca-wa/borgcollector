@@ -1,23 +1,32 @@
 import json
 import base64
+import os
+import logging
+import traceback
 
 from restless.dj import DjangoResource
 from restless.resources import skip_prepare
 
 from django.conf.urls import patterns,  url
+from django.template import Context, Template
 try:
     from django.utils.encoding import smart_text
 except ImportError:
     from django.utils.encoding import smart_unicode as smart_text
 
 from django.contrib import auth
+from django.utils import timezone
 
 from harvest.models import Job
-from tablemanager.models import Publish,Workspace
+from tablemanager.models import Publish,Workspace,Input,DataSource
 from wmsmanager.models import WmsLayer
 from harvest.jobstatemachine import JobStatemachine
 from borg_utils.hg_batch_push import try_set_push_owner, try_clear_push_owner, try_push_to_repository
 from borg_utils.jobintervals import Triggered
+from borg_utils.borg_config import BorgConfiguration
+from borg_utils.resource_status import ResourceStatus
+
+logger = logging.getLogger(__name__)
 
 class BasicHttpAuthMixin(object):
     """
@@ -159,4 +168,135 @@ class MetaResource(DjangoResource,BasicHttpAuthMixin):
             
         return resp
 
+
+class MudmapResource(DjangoResource,BasicHttpAuthMixin):
+    def is_authenticated(self):
+        if self.request.user.is_authenticated():
+            return True
+        else:
+            return self.authenticate(self.request)
+
+    @staticmethod
+    def urls():
+        return patterns('',
+            url(r'^(?P<application>[a-zA-Z0-9_\-]+)/(?P<name>[a-zA-Z0-9_\-]+)/(?P<user>[a-zA-Z0-9_\-\.]+@[a-zA-Z0-9\-]+(\.[a-zA-Z0-9\-]+)+)/$',MudmapResource.as_list(),name='api_mudmap_detail'),
+        )
+     
+    @skip_prepare
+    def create(self,application,name,user, *args, **kwargs):
+        try:
+            json_data = self.data
+            application = application.lower()
+            name = name.lower()
+            user = user.lower()
+            input_name = "{}_{}".format(application,name)
+            #prepare the folder
+            folder = os.path.join(BorgConfiguration.MUDMAP_HOME,application,name)
+            if os.path.exists(folder):
+                if not os.path.isdir(folder):
+                    raise "{} is not a folder".format(folder)
+            else:
+                os.makedirs(folder)
+            #write the json file into folder
+            file_name = os.path.join(folder,"{}.json".format(user))
+            with open(file_name,"wb") as f:
+                f.write(json.dumps(self.data))
+            #get list of geojson files
+            json_files = [os.path.join(folder,f) for f in os.listdir(folder) if f[-5:] == ".json"]
+            #generate the source data
+            data_source = DataSource.objects.get(name="mudmap")
+            #create or update input 
+            mudmap_input = None
+            try:
+                mudmap_input = Input.objects.get(name=input_name)
+                source = Template(data_source.vrt).render(Context({"files":json_files,"self":mudmap_input}))
+                mudmap_input.source = source
+                mudmap_input.full_clean(exclude=["data_source"])
+                mudmap_input.last_modify_time = timezone.now()
+                mudmap_input.save(update_fields=["source","last_modify_time","info"])
+            except Input.DoesNotExist:
+                mudmap_input = Input(name=input_name,data_source=data_source,generate_rowid=False)
+                source = Template(data_source.vrt).render(Context({"files":json_files,"self":mudmap_input}))
+                mudmap_input.source = source
+                mudmap_input.full_clean(exclude=["data_source"])
+                mudmap_input.save()
+        
+            #get or create publish
+            mudmap_publish = None
+            try:
+                mudmap_publish = Publish.objects.get(name=input_name)
+            except Publish.DoesNotExist:
+                #not exist, create it
+                workspace = Workspace.objects.get(name="mudmap")
+                mudmap_publish = Publish(
+                    name=input_name,
+                    workspace=workspace,
+                    interval=Triggered.instance(),
+                    status=ResourceStatus.Enabled,
+                    kmi_title=name,
+                    kmi_abstract=name,
+                    input_table=mudmap_input,sql="$$".join(Publish.TRANSFORM).strip()
+                )
+                mudmap_publish.save()
+            #pubish the job
+            result = JobStatemachine._create_job(mudmap_publish,Triggered.instance())
+    
+            if result[0]:
+                return {"id":result[1]}
+            else:
+                raise Exception(result[1])
+        except:
+            logger.error(traceback.format_exc())
+            raise
+    
+    @skip_prepare
+    def delete_list(self,application,name,user, *args, **kwargs):
+        application = application.lower()
+        name = name.lower()
+        user = user.lower()
+        input_name = "{}_{}".format(application,name)
+        #delere the file from the folder
+        folder = os.path.join(BorgConfiguration.MUDMAP_HOME,application,name)
+        json_files = None
+        if os.path.exists(folder) and os.path.isdir(folder):
+            #delete the json file from the folder
+            file_name = os.path.join(folder,"{}.json".format(user))
+            file_exists = False
+            if os.path.exists(file_name):
+                os.remove(file_name)
+                file_exists = True
+
+            #get list of geojson files
+            json_files = [f for f in os.listdir(folder) if f[-5:] == ".json"]
+            if not json_files:
+                #remove folder
+                try:
+                    os.rmdir(folder)
+                except:
+                    #remove failed,but ignore.
+                    pass
+
+            if not file_exists:
+                #file already removed.
+                return
+
+        #update or delete input 
+        mudmap_input = Input.objects.get(name=input_name)
+        if json_files:
+            #generate the source data
+            data_source = DataSource.objects.get(name="mudmap")
+            source = Template(data_source.vrt).render(Context({"files":json_files}))
+            mudmap_input.source = source
+            mudmap_input.last_modify_time = timezone.now()
+            mudmap_input.save(update_fields=["source","last_modify_time"])
+            #pubish the job
+            result = JobStatemachine._create_job(mudmap_publish,Triggered.instance())
+
+            if result[0]:
+                return 
+            else:
+                raise result[1]
+        else:
+            #no more json files, delete input, and all other dependent objects.
+            mudmap_input.delete()
 

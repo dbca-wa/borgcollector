@@ -182,10 +182,12 @@ class JobFields(BorgModel):
 class DatasourceType(object):
     FILE_SYSTEM = "FileSystem"
     DATABASE = "Database"
+    MUDMAP = "Mudmap"
 
     options = (
         (FILE_SYSTEM,FILE_SYSTEM),
-        (DATABASE,DATABASE)
+        (DATABASE,DATABASE),
+        (MUDMAP,MUDMAP)
     )
 
 @python_2_unicode_compatible
@@ -497,7 +499,7 @@ class Input(JobFields,SignalEnable):
     (as a GDAL VRT definition) so it can be loaded using the OGR toolset.
     """
     name = models.SlugField(max_length=255, unique=True, help_text="Name of table in harvest DB", validators=[validate_slug])
-    data_source = models.ForeignKey(DataSource)
+    data_source = models.ForeignKey(DataSource,limit_choices_to={"type__in":[DatasourceType.FILE_SYSTEM,DatasourceType.DATABASE]})
     foreign_table = models.ForeignKey(ForeignTable, null=True, blank=True, help_text="Foreign table to update VRT from")
     generate_rowid = models.BooleanField(null=False, default=False, help_text="If true, a _rowid column will be added and filled with row data's hash value")
     source = DatasourceField(help_text="GDAL VRT definition in xml", unique=True)

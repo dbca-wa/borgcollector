@@ -147,7 +147,7 @@ PREVIEW_ROOT = os.path.join(BASE_DIR,'preview')
 PREVIEW_URL = '/preview/'
 
 HARVEST_CONFIG = {
-    "BORG_SCHEMA" : "public",
+    "BORG_SCHEMA" : os.environ.get("BORG_SCHEMA") or "public",
     "ROWID_COLUMN" : "_rowid",
     "TEST_SCHEMA" : "test",
     "INPUT_SCHEMA" : "input",
@@ -169,7 +169,8 @@ HARVEST_CONFIG = {
     "USERLIST": os.environ.get("USERLIST", ""),
     "USERLIST_USERNAME": os.environ.get("USERLIST_USERNAME", ""),
     "USERLIST_PASSWORD": os.environ.get("USERLIST_PASSWORD", ""),
-    "MASTER_PATH_PREFIX": os.environ.get("MASTER_PATH_PREFIX", "")
+    "MASTER_PATH_PREFIX": os.environ.get("MASTER_PATH_PREFIX", ""),
+    "MUDMAP_HOME": os.environ.get("MUDMAP_HOME", os.path.abspath(os.path.join(BASE_DIR,"mudmap")))
 }
 
 # Database

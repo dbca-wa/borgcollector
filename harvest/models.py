@@ -69,7 +69,7 @@ class Process(models.Model):
 
 class Job(models.Model):
     batch_id = models.CharField(max_length=64,null=False,editable=False)
-    publish = models.ForeignKey(Publish,editable=False)
+    publish = models.ForeignKey(Publish,editable=False,null=True,on_delete=models.SET_NULL)
     state = models.CharField(max_length=64,null=False, editable=False)
     user_action = models.CharField(max_length=32,null=True,editable=False)
     retry_times = models.PositiveIntegerField(null=False,editable=False,default=0)
