@@ -3,6 +3,12 @@ from django.conf import settings
 class SpatialTable(object):
     """
     get a table's spatial type
+    spatial type format:
+        support up to 5 spatial column in one table
+        each spatial column uses 6 bit postitions, total 5 spatial columns uses 30 bit positions.
+        The bit position index from 0 to 5, and from left to right.
+        The bit0 and bit1 represents the spatial category, currently support "geometry","geography" and "raster"
+        From bit2 to bit5 represents the spatial data type, currently support 'GEOMETRY','POINT','LINESTRING','POLYGON','MULTIPOINT','MULTILINESTRING','MULTIPOLYGON'
     """
 
     _check_table_exist_sql = "SELECT count(1) FROM pg_catalog.pg_class a JOIN pg_catalog.pg_namespace b ON a.relnamespace = b.oid WHERE b.nspname = '{0}' AND a.relname = '{1}'"

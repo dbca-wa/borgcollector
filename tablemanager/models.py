@@ -1974,7 +1974,7 @@ class Publish(Transform,ResourceStatusManagement,SignalEnable):
     spatial_type = models.IntegerField(default=1,editable=False)
     create_extra_index_sql = SQLField(null=True, editable=True,blank=True)
     priority = models.PositiveIntegerField(default=1000)
-    default_style = models.ForeignKey('Style',null=True,on_delete=models.SET_NULL,related_name="+")
+    default_style = models.ForeignKey('Style',null=True,on_delete=models.SET_NULL,related_name="+",blank=True)
     create_table_sql = SQLField(null=True, editable=False)
     geoserver_setting = models.TextField(blank=True,null=True,editable=False)
     pending_actions = models.IntegerField(blank=True,null=True,editable=False)
