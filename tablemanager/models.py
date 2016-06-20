@@ -41,7 +41,7 @@ from sqlalchemy import create_engine
 from borg_utils.gdal import detect_epsg
 from borg_utils.spatial_table import SpatialTable
 from borg_utils.borg_config import BorgConfiguration
-from borg_utils.jobintervals import JobInterval,Weekly,Triggered
+from borg_utils.jobintervals import JobInterval
 from borg_utils.resource_status import ResourceStatus,ResourceStatusManagement
 from borg_utils.db_util import DbUtil
 from borg_utils.signal_enable import SignalEnable
@@ -203,7 +203,7 @@ class DataSource(BorgModel,SignalEnable):
     password = models.CharField(max_length=320,null=True,blank=True)
     sql = SQLField(null=True,blank=True)
     vrt = XMLField(help_text="GDAL VRT template in xml", default="")
-    last_modify_time = models.DateTimeField(auto_now=False,auto_now_add=True,editable=False,default=timezone.now,null=False)
+    last_modify_time = models.DateTimeField(auto_now=False,auto_now_add=True,editable=False,null=False)
 
     def drop(self,cursor,schema,name):
         """
@@ -348,7 +348,7 @@ class ForeignTable(BorgModel,SignalEnable):
     name = models.SlugField(max_length=255, unique=True, help_text="The name of foreign table", validators=[validate_slug])
     server = models.ForeignKey(DataSource,limit_choices_to={"type":DatasourceType.DATABASE})
     sql = SQLField(default="CREATE FOREIGN TABLE \"{{schema}}\".\"{{self.name}}\" () SERVER {{self.server.name}} OPTIONS (schema '<schema>', table '<table>');")
-    last_modify_time = models.DateTimeField(auto_now=False,auto_now_add=True,editable=False,default=timezone.now,null=False)
+    last_modify_time = models.DateTimeField(auto_now=False,auto_now_add=True,editable=False,null=False)
 
     ROW_COUNT_SQL = "SELECT COUNT(*) FROM \"{0}\".\"{1}\";"
     TABLE_MD5_SQL = "SELECT md5(string_agg(md5(CAST(t.* as text)),',')) FROM (SELECT *  from \"{0}\".\"{1}\") as t;"
@@ -508,7 +508,7 @@ class Input(JobFields,SignalEnable):
     spatial_type = models.IntegerField(default=1,editable=False)
     create_table_sql = models.TextField(null=True, editable=False)
     importing_info = models.TextField(max_length=255, null=True, editable=False)
-    last_modify_time = models.DateTimeField(auto_now=False,auto_now_add=True,editable=False,default=timezone.now,null=False)
+    last_modify_time = models.DateTimeField(auto_now=False,auto_now_add=True,editable=False,null=False)
     ds_modify_time = models.DateTimeField(editable=False,null=True)
 
     ABSTRACT_TEMPLATE = """{% if info_dict.abstract %}{{ info_dict.abstract }}
@@ -701,7 +701,7 @@ class Input(JobFields,SignalEnable):
                 if self.foreign_table:
                     if not job:
                         return None
-                    elif job.job_type == Triggered.instance().name:
+                    elif job.job_type == JobInterval.Triggered.name:
                         return False
                     elif job.batch_id:
                         if "table_md5" in self.importing_dict and "row_count" in self.importing_dict:
@@ -1192,7 +1192,7 @@ class Transform(JobFields):
     Base class for a generic transform to be performed on an Input table in
     the harvest DB.
     """
-    last_modify_time = models.DateTimeField(auto_now=False,auto_now_add=True,editable=False,default=timezone.now,null=False)
+    last_modify_time = models.DateTimeField(auto_now=False,auto_now_add=True,editable=False,null=False)
 
     def drop(self, cursor,schema):
         """
@@ -1570,7 +1570,7 @@ class NormalTable(BorgModel,SignalEnable):
     name = models.CharField(unique=True, max_length=255, validators=[validate_slug])
     normalise = models.OneToOneField(Normalise,null=True,editable=False)
     create_sql = SQLField(default="CREATE TABLE \"{{self.name}}\" (name varchar(32) unique);")
-    last_modify_time = models.DateTimeField(auto_now=False,auto_now_add=True,editable=False,default=timezone.now,null=False)
+    last_modify_time = models.DateTimeField(auto_now=False,auto_now_add=True,editable=False,null=False)
 
     def is_up_to_date(self,job=None,enforce=False):
         """
@@ -1728,7 +1728,7 @@ class PublishChannel(BorgModel,SignalEnable):
     wms_version = models.CharField(max_length=32, null=True,blank=True)
     wms_endpoint = models.CharField(max_length=256, null=True,blank=True)
     gwc_endpoint = models.CharField(max_length=256, null=True,blank=True)
-    last_modify_time = models.DateTimeField(auto_now=False,auto_now_add=True,editable=False,default=timezone.now,null=False)
+    last_modify_time = models.DateTimeField(auto_now=False,auto_now_add=True,editable=False,null=False)
 
     def delete(self,using=None):
         logger.info('Delete {0}:{1}'.format(type(self),self.name))
@@ -1965,7 +1965,7 @@ class Publish(Transform,ResourceStatusManagement,SignalEnable):
 
     name = models.SlugField(max_length=255, unique=True, help_text="Name of Publish", validators=[validate_slug])
     workspace = models.ForeignKey(Workspace)
-    interval = models.CharField(max_length=64, choices=JobInterval.publish_options(), default=Weekly.instance().name)
+    interval = models.CharField(max_length=64, choices=JobInterval.publish_options(), default=JobInterval.Weekly.name)
     status = models.CharField(max_length=32, choices=ResourceStatus.publish_status_options,default=ResourceStatus.Enabled.name)
     kmi_title = models.CharField(max_length=512,null=True,editable=True,blank=True)
     kmi_abstract = models.TextField(null=True,editable=True,blank=True)
@@ -2735,7 +2735,7 @@ class Style(BorgModel,ResourceStatusManagement):
     publish = models.ForeignKey(Publish,null=False,blank=False)
     status = models.CharField(max_length=32, choices=ResourceStatus.publish_status_options,default=ResourceStatus.Enabled.name)
     sld = XMLField(help_text="Styled Layer Descriptor", unique=False,blank=True,null=True)
-    last_modify_time = models.DateTimeField(auto_now=False,auto_now_add=True,editable=False,default=timezone.now,null=False)
+    last_modify_time = models.DateTimeField(auto_now=False,auto_now_add=True,editable=False,null=False)
 
     _style_name_re = re.compile("<se:Name>(?P<layer>.*?)</se:Name>")
     _property_re = re.compile("<ogc:PropertyName>(?P<property>.*?)</ogc:PropertyName>")

@@ -12,14 +12,14 @@ from tablemanager.models import Publish, Workspace
 from harvest.models import Job,JobLog
 from harvest.jobstates import JobStateOutcome,Failed,Completed,JobState
 from harvest.harveststates import Waiting
-from borg_utils.jobintervals import JobInterval,Manually,Realtime
+from borg_utils.jobintervals import JobInterval
 from borg_utils.borg_config import BorgConfiguration
 
 logger = logging.getLogger(__name__)
 
 class JobStatemachine(object):
     @staticmethod
-    def create_job_by_name(publish_name,job_interval=Manually.instance(),job_batch_id=None):
+    def create_job_by_name(publish_name,job_interval=JobInterval.Manually,job_batch_id=None):
         """
         manually create a job by name
         """
@@ -37,7 +37,7 @@ class JobStatemachine(object):
 
 
     @staticmethod
-    def create_job(publish_id,job_interval=Manually.instance(),job_batch_id=None):
+    def create_job(publish_id,job_interval=JobInterval.Manually,job_batch_id=None):
         """
         manually create a job by id
         """
@@ -49,7 +49,7 @@ class JobStatemachine(object):
         return JobStatemachine._create_job(p,job_interval,job_batch_id)
 
     @staticmethod
-    def _create_job(publish,job_interval=Manually.instance(),job_batch_id=None):
+    def _create_job(publish,job_interval=JobInterval.Manually,job_batch_id=None):
         """
         manually create a job
         return (true,'OK'), if create a job, otherwise return (False,message)
@@ -91,7 +91,7 @@ class JobStatemachine(object):
                         job_id = job.id,
                         state = "Create",
                         outcome = "Create",
-                        message = "Created by custodian" if job_interval == Manually.instance() else "Created by other application",
+                        message = "Created by custodian" if job_interval == JobInterval.Manually else "Created by other application",
                         next_state = job.state,
                         start_time = timezone.now(),
                         end_time = timezone.now())
@@ -110,7 +110,7 @@ class JobStatemachine(object):
         jobs = []
         job_batch_id = job_batch_id or interval_choice.job_batch_id()
 
-        check_job = Job(id=-1,batch_id="CK" + job_batch_id) if interval_choice == Realtime.instance() else None
+        check_job = Job(id=-1,batch_id="CK" + job_batch_id) if interval_choice == JobInterval.Realtime else None
         up_to_date = False
         
         for p in Publish.objects.filter(interval = interval_choice.name, waiting = 0).order_by('priority'):
@@ -118,7 +118,7 @@ class JobStatemachine(object):
                 #publish is disabled, ignore
                 continue
 
-            if interval_choice == Realtime.instance():
+            if interval_choice == JobInterval.Realtime:
                 #Realtime publish, check whether input is up to date.
                 up_to_date = True
                 for i in p.inputs:

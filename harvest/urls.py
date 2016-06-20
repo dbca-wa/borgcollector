@@ -1,7 +1,7 @@
-from django.conf.urls import patterns,  url
+from django.conf.urls import url
 from harvest.views import ApproveJobView, CancelJobView
 
-urlpatterns = patterns('',
+urlpatterns = (
     url(r'^(?P<job_id>\d+)/approve?$', ApproveJobView.as_view(), name = 'approve_job' ),
     url(r'^(?P<job_id>\d+)/cancel?$', CancelJobView.as_view(), name = 'cancel_job' ),
 

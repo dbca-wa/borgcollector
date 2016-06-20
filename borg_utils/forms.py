@@ -27,6 +27,15 @@ class BorgModelForm(django.forms.ModelForm):
         else:
             return (BorgModelForm.EDIT,"edit",False,False,None)
         
+    def is_valid(self):
+        """
+        Return false, if super class's is_valid return False or not running in SAVE Mode.
+        """
+        valid =  super(BorgModelForm,self).is_valid()
+        if not valid:
+            return valid
+        else:
+            return self._mode[0] == BorgModelForm.SAVE
 
     def save(self, commit=True):
         if self._mode[0] == BorgModelForm.NOT_CHANGED:

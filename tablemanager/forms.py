@@ -70,19 +70,12 @@ class DataSourceForm(BorgModelForm):
         self.instance.enable_save_signal()
         return super(DataSourceForm, self).save(commit)
 
-    @classmethod
-    def get_fields(cls,obj=None):
-        if obj and obj.type == DatasourceType.DATABASE:
-            return ["name","type","description","user","password","sql","vrt"]
-        else:
-            return ["name","type","description","vrt"]
-
 
     class Meta:
         model = DataSource
         fields = "__all__"
         widgets = {
-                'type': BorgSelect(attrs={"onChange":"$('#datasource_form').append(\"<input type='hidden' name='_change_type' value=''>\");$('#datasource_form').submit()"}),
+                'type': BorgSelect(attrs={"onChange":"django.jQuery('#datasource_form').append(\"<input type='hidden' name='_change_type' value=''>\");django.jQuery('#datasource_form').submit()"}),
                 'description': forms.TextInput(attrs={"style":"width:95%"})
         }
 
@@ -116,18 +109,6 @@ class InputForm(BorgModelForm):
             return (InputForm.CHANGE_DATA_SOURCE,"change_foreign_table",True,False,('name','data_source','foreign_table'))
 
         return super(InputForm,self).get_mode(data)
-
-    def get_fields(self,obj=None):
-        if obj and hasattr(obj,"data_source"):
-            if obj.data_source.type == DatasourceType.DATABASE:
-                if hasattr(obj,"foreign_table"):
-                    return ["name","data_source","foreign_table","generate_rowid","source"]
-                else:
-                    return ["name","data_source","foreign_table"]
-            else:
-                return ["name","data_source","generate_rowid","source"]
-        else:
-            return ["name","data_source"]
 
     def insert_fields(self):
         self.data['source'] = self.instance.source
@@ -321,12 +302,6 @@ class PublishForm(BorgModelForm,GeoserverSettingForm):
             self.fields['name'].widget.attrs['readonly'] = True
             self.fields['workspace'].widget.attrs['readonly'] = True
 
-    @classmethod
-    def get_fields(cls,obj=None):
-        if obj and SpatialTable.check_normal(obj.spatial_type):
-            return ('name','workspace','interval','status','input_table','dependents','priority','sql','create_extra_index_sql')
-        else:
-            return ('name','workspace','interval','status','input_table','dependents','priority','kmi_title','kmi_abstract','sql','create_extra_index_sql',"create_cache_layer","server_cache_expire","client_cache_expire")
 
     def _post_clean(self):
         super(PublishForm,self)._post_clean()

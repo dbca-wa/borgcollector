@@ -9,7 +9,7 @@ from datetime import timedelta
 from restless.dj import DjangoResource
 from restless.resources import skip_prepare
 
-from django.conf.urls import patterns,  url
+from django.conf.urls import  url
 from django.template import Context, Template
 try:
     from django.utils.encoding import smart_text
@@ -26,7 +26,7 @@ from harvest.jobstatemachine import JobStatemachine
 from monitor.models import SlaveServer,PublishSyncStatus
 
 from borg_utils.hg_batch_push import try_set_push_owner, try_clear_push_owner, try_push_to_repository
-from borg_utils.jobintervals import Triggered,Manually
+from borg_utils.jobintervals import JobInterval
 from borg_utils.borg_config import BorgConfiguration
 from borg_utils.resource_status import ResourceStatus
 from harvest.jobstates import Completed
@@ -71,18 +71,18 @@ class JobResource(DjangoResource,BasicHttpAuthMixin):
 
     @staticmethod
     def urls():
-        return patterns('',
-            url(r'^/?$',JobResource.as_list(),name='api_job_create'),
-        )
+        return [
+            url(r'^/?$',JobResource.as_list(),name='create_job'),
+        ]
      
     @skip_prepare
     def create(self):
-        job_batch_id = Triggered.instance().job_batch_id()
+        job_batch_id = JobInterval.Triggered.job_batch_id()
         resp = {"status":True}
         result = None
         for name in self.data.get('publishes') or []:
             resp[name] = {}
-            result = JobStatemachine.create_job_by_name(name,Triggered.instance(),job_batch_id)
+            result = JobStatemachine.create_job_by_name(name,JobInterval.Triggered,job_batch_id)
             if result[0]:
                 resp[name]["status"] = True
                 resp[name]["job_id"] = result[1]
@@ -102,9 +102,9 @@ class MetaResource(DjangoResource,BasicHttpAuthMixin):
 
     @staticmethod
     def urls():
-        return patterns('',
-            url(r'^/?$',MetaResource.as_list(),name='api_meta_create'),
-        )
+        return[
+            url(r'^/?$',MetaResource.as_list(),name='publish_meta'),
+        ]
      
     @skip_prepare
     def create(self):
@@ -183,9 +183,9 @@ class MudmapResource(DjangoResource,BasicHttpAuthMixin):
 
     @staticmethod
     def urls():
-        return patterns('',
-            url(r'^(?P<application>[a-zA-Z0-9_\-]+)/(?P<name>[a-zA-Z0-9_\-]+)/(?P<user>[a-zA-Z0-9_\-\.]+@[a-zA-Z0-9\-]+(\.[a-zA-Z0-9\-]+)+)/$',MudmapResource.as_list(),name='api_mudmap_detail'),
-        )
+        return [
+            url(r'^(?P<application>[a-zA-Z0-9_\-]+)/(?P<name>[a-zA-Z0-9_\-]+)/(?P<user>[a-zA-Z0-9_\-\.]+@[a-zA-Z0-9\-]+(\.[a-zA-Z0-9\-]+)+)/$',MudmapResource.as_list(),name='publish_mudmap'),
+        ]
      
     @skip_prepare
     def create(self,application,name,user, *args, **kwargs):
@@ -252,7 +252,7 @@ class MudmapResource(DjangoResource,BasicHttpAuthMixin):
                 mudmap_publish = Publish(
                     name=input_name,
                     workspace=workspace,
-                    interval=Manually.instance(),
+                    interval=JobInterval.Manually,
                     status=ResourceStatus.Enabled,
                     kmi_title=name,
                     kmi_abstract=name,
@@ -261,7 +261,7 @@ class MudmapResource(DjangoResource,BasicHttpAuthMixin):
             mudmap_publish.full_clean(exclude=["interval"])   
             mudmap_publish.save()
             #pubish the job
-            result = JobStatemachine._create_job(mudmap_publish,Triggered.instance())
+            result = JobStatemachine._create_job(mudmap_publish,JobInterval.Triggered)
 
             if result[0]:
                 return result[1]
@@ -316,9 +316,9 @@ class PublishResource(DjangoResource,BasicHttpAuthMixin):
 
     @staticmethod
     def urls():
-        return patterns('',
-            url(r'^(?P<name>[a-zA-Z0-9_\-]+)/$',PublishResource.as_detail(),name='api_publish_detail'),
-        )
+        return [
+            url(r'^(?P<name>[a-zA-Z0-9_\-]+)/$',PublishResource.as_detail(),name='publish_status'),
+        ]
      
 
     @classmethod
@@ -376,8 +376,8 @@ class PublishResource(DjangoResource,BasicHttpAuthMixin):
             if publish.job_id:
                 resp["publish"] = {
                     "publishing_jobid" : publishing_job.id if publishing_job else None,
-                    "publishing_failed" : publishing_job.is_error_state if publishing_job else False,
-                    "publishing_message": publisheding_job.message if publishing_job and publishing_job.is_error_state else None,
+                    "publishing_failed" : publishing_job.jobstate.is_error_state if publishing_job else False,
+                    "publishing_message": publisheding_job.message if publishing_job and publishing_job.jobstate.is_error_state else None,
                     "published_jobid" : latest_published_job.id if latest_published_job else None,
                     "publish_time" : self._get_milliseconds(latest_published_job.finished) if latest_published_job else None,
                     "deploied_jobid":deploied_jobid,
@@ -402,3 +402,7 @@ class PublishResource(DjangoResource,BasicHttpAuthMixin):
         except:
             logger.error(traceback.format_exc())
             raise
+
+
+urlpatterns =  JobResource.urls() + MetaResource.urls() + MudmapResource.urls() + PublishResource.urls()
+

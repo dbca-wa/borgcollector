@@ -1,4 +1,4 @@
-from reversion import VersionAdmin
+from reversion.admin import VersionAdmin
 
 from borg.admin import site
 from application.models import Application, Application_Layers

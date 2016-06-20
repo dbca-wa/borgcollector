@@ -12,7 +12,7 @@ from borg_utils.borg_config import BorgConfiguration
 
 from tablemanager.models import Publish
 from harvest.jobstates import JobState
-from borg_utils.jobintervals import Manually
+from borg_utils.jobintervals import JobInterval
 
 class Process(models.Model):
     current_server=socket.getfqdn()
@@ -90,6 +90,12 @@ class Job(models.Model):
         return self.publish.normaltables
 
     @property
+    def jobstate(self):
+        if self.state:
+            return JobState.get_jobstate(self.state)
+        return None
+
+    @property
     def normalises(self):
         """
         the sorted related normalises 
@@ -106,7 +112,7 @@ class Job(models.Model):
 
     @property 
     def is_manually_created(self):
-        return self.job_type == Manually.instance().name
+        return self.job_type == JobInterval.Manually.name
 
     @property
     def inputs(self):
