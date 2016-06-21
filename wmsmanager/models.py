@@ -123,7 +123,7 @@ class WmsServer(models.Model,ResourceStatusManagement,SignalEnable):
                     
             if layer_size == 0:
                 #no layers found in the server
-                #delete all layers which is not published or unpublished or remove
+                #delete all layers
                 WmsLayer.objects.filter(server=self).delete()
             else:
                 #set status to DELETE for layers not returned from server

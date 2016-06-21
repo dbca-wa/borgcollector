@@ -21,7 +21,6 @@ from tablemanager.models import Publish,Workspace
 from harvest.models import Job
 from borg_utils.singleton import SingletonMetaclass,Singleton
 from borg_utils.borg_config import BorgConfiguration
-from borg_utils.spatial_table import SpatialTable
 from borg_utils.utils import file_md5
 from borg_utils.resource_status import ResourceStatus
 from harvest.jobstates import JobStateOutcome,JobState,Failed,Completed

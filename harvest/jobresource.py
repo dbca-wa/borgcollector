@@ -72,7 +72,7 @@ class JobResource(DjangoResource,BasicHttpAuthMixin):
     @staticmethod
     def urls():
         return [
-            url(r'^/?$',JobResource.as_list(),name='create_job'),
+            url(r'^$',JobResource.as_list(),name='create_job'),
         ]
      
     @skip_prepare
@@ -103,7 +103,7 @@ class MetaResource(DjangoResource,BasicHttpAuthMixin):
     @staticmethod
     def urls():
         return[
-            url(r'^/?$',MetaResource.as_list(),name='publish_meta'),
+            url(r'^$',MetaResource.as_list(),name='publish_meta'),
         ]
      
     @skip_prepare

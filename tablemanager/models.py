@@ -837,7 +837,7 @@ class Input(JobFields,SignalEnable):
 
             #import ipdb;ipdb.set_trace()
             #check the table is spatial or non spatial
-            self.spatial_type = SpatialTable.get_instance(cursor,schema,self.name,True).spatial_type
+            self.spatial_type = SpatialTable.get_instance(schema,self.name,True).spatial_type
         except ValidationError as e:
             raise e
         except Exception as e:
@@ -2112,7 +2112,7 @@ class Publish(Transform,ResourceStatusManagement,SignalEnable):
         """
         #import ipdb; ipdb.set_trace()
         #drop auto generated spatial index
-        #SpatialTable.get_instance(cursor,publish_schema,self.table_name,True).drop_indexes(cursor)
+        #SpatialTable.get_instance(publish_schema,self.table_name,True).drop_indexes()
         #drop all indexes except primary key
         #DbUtil.drop_all_indexes(publish_schema,self.table_name,False)
 
@@ -2140,7 +2140,7 @@ class Publish(Transform,ResourceStatusManagement,SignalEnable):
             cursor.execute(sql)
 
         #create index
-        SpatialTable.get_instance(cursor,publish_schema,self.table_name,True).create_indexes(cursor)
+        SpatialTable.get_instance(publish_schema,self.table_name,True).create_indexes()
 
 
     def _create(self, cursor,schema,input_schema=None,normal_schema=None):
@@ -2206,7 +2206,7 @@ class Publish(Transform,ResourceStatusManagement,SignalEnable):
             self.create_table_sql = DbUtil.get_create_table_sql(self.workspace.test_schema,self.table_name)
 
             #check the table is spatial or non spatial
-            self.spatial_type = SpatialTable.get_instance(cursor,self.workspace.test_schema,self.table_name,True).spatial_type
+            self.spatial_type = SpatialTable.get_instance(self.workspace.test_schema,self.table_name,True).spatial_type
 
             if self.pk and hasattr(self,"changed_fields")  and "status" in self.changed_fields:
                 #publish status changed.
@@ -2453,13 +2453,11 @@ class Publish(Transform,ResourceStatusManagement,SignalEnable):
         #bbox
         if SpatialTable.check_spatial(self.spatial_type):
             cursor=connection.cursor()
-            st = SpatialTable.get_instance(cursor,self.workspace.schema,self.table_name,bbox=True,crs=True)
-            if st.geometry_columns:
-                meta_data["bounding_box"] = st.geometry_columns[0][2]
-                meta_data["crs"] = st.geometry_columns[0][3]
-            elif st.geography_columns:
-                meta_data["bounding_box"] = st.geography_columns[0][2]
-                meta_data["crs"] = st.geography_columns[0][3]
+            st = SpatialTable.get_instance(self.workspace.schema,self.table_name,bbox=True,crs=True)
+            if st.spatial_column:
+                meta_data["bounding_box"] = st.bbox
+                meta_data["crs"] = st.crs
+
         meta_data["styles"] = []
         for style_format in ["sld","qml","lyr"]:
             f = self.builtin_style_file(style_format)

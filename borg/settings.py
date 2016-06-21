@@ -21,7 +21,6 @@ BASE_DIR = os.path.dirname(os.path.dirname(__file__))
 SECRET_KEY = os.environ.get('SECRET_KEY', '')
 FDW_URL = os.environ.get('FDW_URL', '')
 DEBUG = os.environ.get('DEBUG', False)
-TEMPLATE_DEBUG = DEBUG
 FDW_URL_SETTINGS = None
 if FDW_URL:
     FDW_URL_SETTINGS = dj_database_url.parse(FDW_URL)
@@ -36,13 +35,6 @@ CSW_URL = os.environ.get('CSW_URL','')
 CSW_USER = os.environ.get('CSW_USER','')
 CSW_PASSWORD = os.environ.get('CSW_PASSWORD','')
 DEFAULT_CRS=os.environ.get("DEFAULT_CRS","EPSG:4326")
-
-from django.conf.global_settings import TEMPLATE_CONTEXT_PROCESSORS as TCP
-
-TEMPLATE_CONTEXT_PROCESSORS = list(TCP) + [
-    'django.core.context_processors.request',
-    #'django.core.context_processors.media',
-]
 
 # Django suit
 
@@ -61,6 +53,7 @@ INSTALLED_APPS = (
     'django.contrib.sessions',
     'django.contrib.messages',
     'django.contrib.staticfiles',
+    'django.contrib.postgres',
     'django_extensions',
     'django_uwsgi',
     #'django_wsgiserver',
@@ -72,6 +65,7 @@ INSTALLED_APPS = (
     #'rolemanager',
     #'application',
     'wmsmanager',
+    'livelayermanager',
     'layergroup',
     'monitor',
     'borg_utils',
@@ -120,6 +114,7 @@ TEMPLATES = [
         ],
         'APP_DIRS': True,
         'OPTIONS': {
+            "debug" : DEBUG,
             'context_processors': [
                 # Insert your TEMPLATE_CONTEXT_PROCESSORS here or use this
                 # list if you haven't customized them:
@@ -182,7 +177,9 @@ HARVEST_CONFIG = {
     "FULL_DATA_DUMP_DIR" : os.path.abspath(os.path.join(DOWNLOAD_ROOT, "full_data")),
     "STYLE_FILE_DUMP_DIR" : os.path.abspath(os.path.join(DOWNLOAD_ROOT, "style_file")),
     "WMS_LAYER_DIR" : os.path.abspath(os.path.join(DOWNLOAD_ROOT, "wms_layer")),
+    "LIVE_LAYER_DIR" : os.path.abspath(os.path.join(DOWNLOAD_ROOT, "live_layer")),
     "WMS_STORE_DIR" : os.path.abspath(os.path.join(DOWNLOAD_ROOT, "wms_store")),
+    "LIVE_STORE_DIR" : os.path.abspath(os.path.join(DOWNLOAD_ROOT, "live_store")),
     "WORKSPACE_AS_SCHEMA" : True,
     "MAX_TEST_IMPORT_TIME" : 5, #seconds
     "RETRY_INTERVAL" : 300, #seconds

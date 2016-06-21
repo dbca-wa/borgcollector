@@ -75,16 +75,19 @@ class BorgModelForm(django.forms.ModelForm):
     def _post_clean(self):
         opts = self._meta
         # Update the model instance with self.cleaned_data.
-        if self._mode[0] == BorgModelForm.SAVE and self.instance.pk:
-            #save request, check whether it is changed or not
-            changed_fields = set()
-            for field in self.base_fields.keys():
-                if hasattr(self.instance,field) and (self.cleaned_data[field] or None) != (getattr(self.instance,field) or None):
-                    changed_fields.add(field)
+        if self._mode[0] == BorgModelForm.SAVE :
+            if self.instance.pk:
+                #save request, check whether it is changed or not
+                changed_fields = set()
+                for field in self.base_fields.keys():
+                    if hasattr(self.instance,field) and (self.cleaned_data[field] or None) != (getattr(self.instance,field) or None):
+                        changed_fields.add(field)
 
-            self.instance.changed_fields = changed_fields
-            if not changed_fields:
-                self._mode=(BorgModelForm.NOT_CHANGED,None,False,False)
+                self.instance.changed_fields = changed_fields
+                if not changed_fields:
+                    self._mode=(BorgModelForm.NOT_CHANGED,None,False,False)
+            else:
+               self.instance.changed_fields = "__all__"
 
         self.instance = django.forms.models.construct_instance(self, self.instance, opts.fields, opts.exclude)
 

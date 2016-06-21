@@ -1,5 +1,7 @@
 from django.conf import settings
 
+from .db_util import defaultDbUtil
+
 class SpatialTable(object):
     """
     get a table's spatial type
@@ -30,25 +32,25 @@ class SpatialTable(object):
     _types = ['GEOMETRY','POINT','LINESTRING','POLYGON','MULTIPOINT','MULTILINESTRING','MULTIPOLYGON']
 
     @staticmethod
-    def get_instance(cursor,schema,table,refresh=False,bbox=False,crs=False):
+    def get_instance(schema,table,refresh=False,bbox=False,crs=False):
         o = None
         if refresh:
-            o = SpatialTable(cursor,schema,table,bbox)
+            o = SpatialTable(schema,table,bbox)
             SpatialTable._cache[(schema,table)] = o
         else:
             try:
                 o = SpatialTable._cache[(schema,table)]
             except:
-                o = SpatialTable(cursor,schema,table,bbox)
+                o = SpatialTable(schema,table,bbox)
                 SpatialTable._cache[(schema,table)] = o
 
             if bbox and not o._bbox:
-                o._retrieve_bbox(cursor)
+                o._retrieve_bbox()
             if bbox and not o._crs:
-                o._retrieve_crs(cursor)
+                o._retrieve_crs()
         return o
 
-    def __init__(self,cursor,schema,table,bbox=False,crs=False):
+    def __init__(self,schema,table,bbox=False,crs=False):
         self._exists = False
         self._geometry_columns = []
         self._geography_columns = []
@@ -59,7 +61,7 @@ class SpatialTable(object):
         self._table = table
         self._bbox = bbox
         self._crs = crs
-        self._initialize(cursor)
+        self._initialize()
     
     def reset(self):
         """
@@ -83,37 +85,23 @@ class SpatialTable(object):
                 SpatialTable._type_dict = type_dict
                 return SpatialTable.get_type_id(type_name)
                        
-    def _initialize(self,cursor):
+    def _initialize(self):
         if not self._exists:
             #not exist, reload again
-            sql_result = cursor.execute(SpatialTable._check_table_exist_sql.format(self._schema,self._table))
-            if sql_result:               
-                self._exists = sql_result.fetchone()[0] and True or False
-            else:
-                self._exists = row = cursor.fetchone()[0] and True or False
-            if self._exists:
-                sql_result = cursor.execute(SpatialTable._get_geometry_columns_sql.format(SpatialTable._database,self._schema,self._table))
-                if sql_result:               
-                    self._geometry_columns = [[x[0],x[1],None,None] for x in sql_result.fetchall()]
-                else:
-                    self._geometry_columns = [[x[0],x[1],None,None] for x in cursor.fetchall()]
+            if defaultDbUtil.table_exists(self._chema,self._table):
+                rows = defaultDbUtil.query(SpatialTable._get_geometry_columns_sql.format(SpatialTable._database,self._schema,self._table))
+                self._geometry_columns = [[x[0],x[1],None,None] for x in rows]
                 
-                sql_result = cursor.execute(SpatialTable._get_geography_columns_sql.format(SpatialTable._database,self._schema,self._table))
-                if sql_result:               
-                    self._geography_columns = [[x[0],x[1],None,None] for x in sql_result.fetchall()]
-                else:
-                    self._geography_columns = [[x[0],x[1],None,None] for x in cursor.fetchall()]
+                rows = defaultDbUtil.query(SpatialTable._get_geography_columns_sql.format(SpatialTable._database,self._schema,self._table))
+                self._geography_columns = [[x[0],x[1],None,None] for x in rows]
                 
-                sql_result = cursor.execute(SpatialTable._get_raster_columns_sql.format(SpatialTable._database,self._schema,self._table))
-                if sql_result:               
-                    self._raster_columns = [x[0] for x in sql_result.fetchall()]
-                else:
-                    self._raster_columns = [x[0] for x in cursor.fetchall()]
+                rows = defaultDbUtil.query(SpatialTable._get_raster_columns_sql.format(SpatialTable._database,self._schema,self._table))
+                self._raster_columns = [x[0] for x in rows]
 
                 self._spatial_type = 0
                 
                 if self._bbox:
-                    self._retrieve_bbox(cursor)
+                    self._retrieve_bbox()
 
                 column_index = 0
                 if self._geometry_columns:
@@ -136,56 +124,52 @@ class SpatialTable(object):
 
                 self._spatial_type_desc = SpatialTable.get_spatial_type_desc(self._spatial_type)
 
-    def _retrieve_bbox(self,cursor):
+    def _retrieve_bbox(self):
         self._bbox = False
         if self._geometry_columns:
             row = None
             for column in self._geometry_columns:
-                sql_result = cursor.execute(SpatialTable._retrieve_bbox_sql.format(self._schema,self._table,column[0]))
-                if sql_result:               
-                    row = sql_result.fetchone()
-                else:
-                    row = cursor.fetchone()
+                row = defaultDbUtil.get(SpatialTable._retrieve_bbox_sql.format(self._schema,self._table,column[0]))
                 if any(row):
                     column[2] =  (row[0],row[1],row[2],row[3])
                 
         if self._geography_columns:
             row = None
             for column in self._geography_columns:
-                sql_result = cursor.execute(SpatialTable._retrieve_bbox_sql.format(self._schema,self._table,column[0]))
-                if sql_result:               
-                    row = sql_result.fetchone()
-                else:
-                    row = cursor.fetchone()
+                row = defaultDbUtil.get(SpatialTable._retrieve_bbox_sql.format(self._schema,self._table,column[0]))
                 if row[0]:
                     column[2] =  (row[0],row[1],row[2],row[3])
                 
         self._bbox = True
 
-    def _retrieve_crs(self,cursor):
+    def _retrieve_crs(self):
         self._crs = False
         if self._geometry_columns:
             row = None
             for column in self._geometry_columns:
-                sql_result = cursor.execute(SpatialTable._retrieve_crs_sql.format(self._schema,self._table,column[0]))
-                if sql_result:               
-                    row = sql_result.fetchone()
-                else:
-                    row = cursor.fetchone()
+                row = defaultDbUtil.get(SpatialTable._retrieve_crs_sql.format(self._schema,self._table,column[0]))
                 column[3] =  "EPSG:{}".format(row[0]) if row else settings.DEFAULT_CRS
                 
         if self._geography_columns:
             row = None
             for column in self._geography_columns:
-                sql_result = cursor.execute(SpatialTable._retrieve_bbox_sql.format(self._schema,self._table,column[0]))
-                if sql_result:               
-                    row = sql_result.fetchone()
-                else:
-                    row = cursor.fetchone()
+                row = defaultDbUtil.get(SpatialTable._retrieve_bbox_sql.format(self._schema,self._table,column[0]))
                 column[3] =  "EPSG:{}".format(row[0]) if row else settings.DEFAULT_CRS
                 
         self._crs = True
 
+
+    @property
+    def spatial_column(self):
+        return self._geometry_columns[0][0] if self._geometry_columns else (self._geography_columns[0][0] if self._geography_columns else ( self._raster_columns[0][0] if self._raster_columns else None))
+
+    @property
+    def bbox(self):
+        return self._geometry_columns[0][2] if self._geometry_columns else (self._geography_columns[0][2] if self._geography_columns else ( self._raster_columns[0][2] if self._raster_columns else None))
+
+    @property
+    def crs(self):
+        return self._geometry_columns[0][3] if self._geometry_columns else (self._geography_columns[0][3] if self._geography_columns else ( self._raster_columns[0][3] if self._raster_columns else None))
 
     @property
     def geometry_columns(self):
@@ -223,7 +207,7 @@ class SpatialTable(object):
     def is_spatial(self):
         return SpatialTable.check_spatial(self._spatial_type)
 
-    def create_indexes(self,cursor):
+    def create_indexes(self):
         """
         create gist index for each geometry column
         """
@@ -232,16 +216,11 @@ class SpatialTable(object):
         for c in self._geometry_columns:
             #import ipdb; ipdb.set_trace()
             index_name = "{0}_{1}".format(self._table,c[0])
-            sql_result = cursor.execute(SpatialTable._check_index_sql.format(self._schema,self._table,index_name))
-            if sql_result:               
-                index_exists = sql_result.fetchone()[0] and True or False
-            else:
-                index_exists = cursor.fetchone()[0] and True or False
-            
+            index_exists = defaultDbUtil.exists(SpatialTable._check_index_sql.format(self._schema,self._table,index_name))
             if not index_exists:
-                cursor.execute(SpatialTable._create_index_sql.format(self._schema,self._table,index_name,c[0]))
+                defaultDbUtil.update(SpatialTable._create_index_sql.format(self._schema,self._table,index_name,c[0]))
             
-    def drop_indexes(self,cursor):
+    def drop_indexes(self):
         """
         drop gist index for each geometry column and geography column
         """
@@ -249,7 +228,7 @@ class SpatialTable(object):
         for c in self._geometry_columns:
             #import ipdb; ipdb.set_trace()
             index_name = "{0}_{1}".format(self._table,c[0])
-            sql_result = cursor.execute(SpatialTable._drop_index_sql.format(self._schema,index_name))
+            defaultDbUtil.update(SpatialTable._drop_index_sql.format(self._schema,index_name))
 
     @staticmethod
     def get_spatial_type_desc(spatial_type):

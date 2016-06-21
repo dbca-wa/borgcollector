@@ -21,7 +21,7 @@ class Process(models.Model):
     name = models.CharField(max_length=32,null=False,editable=False)
     desc = models.CharField(max_length=256,null=False,editable=False)
     server = models.CharField(max_length=64,null=False,editable=False)
-    pid = models.IntegerField(max_length=64,null=False,editable=False)
+    pid = models.IntegerField(null=False,editable=False)
     status = models.CharField(max_length=32,null=False,editable=False)
     last_message = models.TextField(null=True,editable=False)
     last_starttime = models.DateTimeField(null=True, editable=False)
