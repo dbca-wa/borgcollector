@@ -98,7 +98,7 @@ class WmsServer(models.Model,ResourceStatusManagement,SignalEnable):
 
         if o:
             #already exist
-            self.status = o.next_status(ResourceAction.UPDATE)
+            self.status = self.next_status(ResourceAction.UPDATE)
 
         self.last_modify_time = timezone.now()
 
@@ -131,7 +131,6 @@ class WmsServer(models.Model,ResourceStatusManagement,SignalEnable):
 
             self.layers = layer_size
             self.last_refresh_time = now
-            self.status = self.next_status()
             if save:
                 self.save()
         refresh_select_choices.send(self,choice_family="wmslayer")
@@ -389,7 +388,7 @@ class WmsLayer(models.Model,ResourceStatusManagement,SignalEnable):
             raise ValidationError("Not changed.")
 
         if o:
-            self.status = o.next_status(ResourceAction.UPDATE)
+            self.status = self.next_status(ResourceAction.UPDATE)
         else:
             self.status = ResourceStatus.New.name
 

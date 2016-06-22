@@ -13,11 +13,12 @@ from livelayermanager.forms import DatasourceForm,LayerForm
 from borg.admin import site
 from borg_utils.resource_status import ResourceStatus,ResourceAction
 from borg_utils.hg_batch_push import try_set_push_owner, try_clear_push_owner, increase_committed_changes, try_push_to_repository
+from borg_utils.spatial_table import SpatialTable
 
 logger = logging.getLogger(__name__)
 
 class DatasourceAdmin(admin.ModelAdmin):
-    list_display = ("name","workspace","host","_layers", "status","last_publish_time","last_unpublish_time", "last_modify_time", "last_refresh_time")
+    list_display = ("name","workspace","host","db_name","schema","_layers", "status","last_publish_time", "last_modify_time", "last_refresh_time")
     readonly_fields = ("_layers","status","last_publish_time", "last_modify_time","last_unpublish_time","last_refresh_time")
     search_fields = ["name","status"]
 
@@ -39,20 +40,18 @@ class DatasourceAdmin(admin.ModelAdmin):
 
     def refresh_layers(self,request,queryset):
         result = None
-        failed_servers = []
-        for server in queryset:
+        failed_datasources = []
+        for datasource in queryset:
             #modify the table data
             try:
-                server.refresh_layers()
+                datasource.refresh_layers()
             except:
                 error = sys.exc_info()
-                #failed_servers.append((server.name,traceback.format_exception_only(error[0],error[1])))
-                failed_servers.append((server.name,traceback.format_exc()))
-                #update table failed, continue to process the next server
+                failed_datasources.append((datasource.name,traceback.format_exc()))
                 continue
 
-        if failed_servers:
-            messages.warning(request, mark_safe("Refresh failed for some selected datasources:<ul>{0}</ul>".format("".join(["<li>{0} : {1}</li>".format(o[0],o[1]) for o in failed_servers]))))
+        if failed_datasources:
+            messages.warning(request, mark_safe("Refresh failed for some selected datasources:<ul>{0}</ul>".format("".join(["<li>{0} : {1}</li>".format(o[0],o[1]) for o in failed_datasources]))))
         else:
             messages.success(request, "Refresh successfully for all selected datasources")
 
@@ -72,20 +71,20 @@ class DatasourceAdmin(admin.ModelAdmin):
         try_set_push_owner("datasource_admin",enforce=True)
         warning_message = None
         try:
-            for server in queryset:
+            for datasource in queryset:
                 #import ipdb;ipdb.set_trace()
                 try:
-                    target_status = server.next_status(action)
-                    if target_status == server.status and not server.publish_required and not server.unpublish_required:
+                    target_status = datasource.next_status(action)
+                    if target_status == datasource.status and not datasource.publish_required and not datasource.unpublish_required:
                         #status not changed
                         continue
                     else:
-                        server.status = target_status
-                        server.save(update_fields=update_fields)
+                        datasource.status = target_status
+                        datasource.save(update_fields=update_fields)
                 except:
                     logger.error(traceback.format_exc())
                     error = sys.exc_info()
-                    failed_objects.append(("{0}:{1}".format(server.workspace.name,server.name),traceback.format_exception_only(error[0],error[1])))
+                    failed_objects.append(("{0}:{1}".format(datasource.workspace.name,datasource.name),traceback.format_exception_only(error[0],error[1])))
                     #remove failed, continue to process the next publish
                     continue
             try:
@@ -118,15 +117,15 @@ class DatasourceAdmin(admin.ModelAdmin):
         try_set_push_owner("datasource_admin",enforce=True)
         warning_message = None
         try:
-            for server in queryset:
+            for datasource in queryset:
                 #import ipdb;ipdb.set_trace()
                 try:
-                    #delete the server
-                    server.delete()
+                    #delete the datasource
+                    datasource.delete()
                 except:
                     logger.error(traceback.format_exc())
                     error = sys.exc_info()
-                    failed_objects.append(("{0}:{1}".format(server.workspace.name,server.name),traceback.format_exception_only(error[0],error[1])))
+                    failed_objects.append(("{0}:{1}".format(datasource.workspace.name,datasource.name),traceback.format_exception_only(error[0],error[1])))
                     #remove failed, continue to process the next publish
                     continue
             try:
@@ -157,8 +156,8 @@ class DatasourceAdmin(admin.ModelAdmin):
         return actions 
 
 class AbstractLayerAdmin(admin.ModelAdmin):
-    list_display = ("name","_workspace","_datasource","title","crs", "status","last_publish_time","last_unpublish_time","last_modify_time")
-    readonly_fields = ("_workspace","_datasource","title","abstract","crs","_bounding_box", "status","last_publish_time","last_unpublish_time", "last_refresh_time","last_modify_time")
+    list_display = ("name","_workspace","_datasource","spatial_type_desc","title","crs", "status","last_publish_time")
+    readonly_fields = ("_workspace","_datasource","spatial_type_desc","crs","_bounding_box", "status","_sql","last_publish_time","last_unpublish_time", "last_refresh_time","last_modify_time")
     search_fields = ["name", "title"]
     ordering = ("datasource","name",)
     list_filter = ("datasource",)
@@ -193,8 +192,22 @@ class AbstractLayerAdmin(admin.ModelAdmin):
     _bounding_box.allow_tags = True
     _bounding_box.short_description = "Bounding Box"
 
+    def _sql(self,o):
+        if o.sql:
+            return "<p style='white-space:pre'>" + o.sql + "</p>"
+        else:
+            return ''
+
+    _sql.allow_tags = True
+    _sql.short_description = "CREATE info for table"
+
+    def spatial_type_desc(self,o):
+        return SpatialTable.get_spatial_type_desc(o.spatial_type)
+    spatial_type_desc.short_description = "Spatial Type"
+    spatial_type_desc.admin_order_field = "spatial_type"
+
     def _datasource(self,o):
-        if o.server:
+        if o.datasource:
             return "<a href='/livelayermanager/datasource/{0}/'>{1}</a>".format(o.datasource.pk,o.datasource.name)
         else:
             return ""
@@ -309,7 +322,7 @@ class AbstractLayerAdmin(admin.ModelAdmin):
             datasource = Datasource.objects.get(pk = search_term)
             return self.model.objects.filter(datasource = datasource).order_by("name"),False
         except:
-            return super(AbstractWmsLayerAdmin,self).get_search_results(request,queryset,search_term)
+            return super(AbstractLayerAdmin,self).get_search_results(request,queryset,search_term)
 
     actions = ['publish','empty_gwc','unpublish']
     def get_actions(self, request):
@@ -322,7 +335,10 @@ class LayerAdmin(AbstractLayerAdmin):
     pass
 
 class PublishedLayerAdmin(AbstractLayerAdmin):
-    pass
+    def get_queryset(self,request):
+        qs = super(PublishedLayerAdmin,self).get_queryset(request)
+        return qs.filter(status__in = ResourceStatus.published_status)
+
 
 site.register(Datasource, DatasourceAdmin)
 site.register(Layer, LayerAdmin)

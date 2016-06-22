@@ -2,7 +2,12 @@ from __future__ import unicode_literals
 import re
 import json
 import logging
+import os
+import hglib
+from datetime import datetime
+import requests
 
+from django.conf import settings
 from django.db import models
 from django.contrib.postgres.fields import HStoreField
 from django.utils import timezone
@@ -12,12 +17,15 @@ from django.db.models.signals import pre_save, pre_delete,post_save,post_delete
 from django.db import transaction
 
 from tablemanager.models import Workspace
+from borg_utils.borg_config import BorgConfiguration
 from borg_utils.resource_status import ResourceStatus,ResourceStatusManagement,ResourceAction
 from borg_utils.signal_enable import SignalEnable
 from borg_utils.db_util import DbUtil
 from borg_utils.spatial_table import SpatialTable
 from borg_utils.signals import inherit_support_receiver
 from borg_utils.models import BorgModel
+from borg_utils.utils import file_md5
+from borg_utils.hg_batch_push import try_set_push_owner, try_clear_push_owner, increase_committed_changes, try_push_to_repository
 
 logger = logging.getLogger(__name__)
 
@@ -49,7 +57,7 @@ class Datasource(BorgModel,ResourceStatusManagement,SignalEnable):
     user = models.CharField(max_length=32,null=True,blank=True)
     password = models.CharField(max_length=32,null=True,blank=True)
     schema = models.CharField(max_length=32,blank=False,default="public")
-    geoserver_setting = models.TextField(blank=True,null=True,editable=True)
+    geoserver_setting = models.TextField(blank=True,null=True,editable=False)
     status = models.CharField(max_length=32,null=False,editable=False,choices=ResourceStatus.layer_status_options)
 
     layers = models.PositiveIntegerField(null=False,editable=False,default=0)
@@ -60,7 +68,6 @@ class Datasource(BorgModel,ResourceStatusManagement,SignalEnable):
     last_modify_time = models.DateTimeField(null=False,editable=False,default=timezone.now)
 
     def clean(self):
-        print "===================={}".format(self.pk)
         if not self.pk:
             self.status = ResourceStatus.New.name
         else:
@@ -68,27 +75,6 @@ class Datasource(BorgModel,ResourceStatusManagement,SignalEnable):
             self.status = self.next_status(ResourceAction.UPDATE)
 
         self.last_modify_time = timezone.now()
-
-    def refresh_layer(self,table_name,type,time):
-        st = SpatialTable(self.schema,table_name,refresh=True,bbox=True,crs=True)
-        if st.is_normal:
-            return False
-        try:
-            table = Layer.objects.get(datasource=self,name=table_name)
-            table.last_refresh_time = now
-        except Layer.DoesNotExist:
-            table = Layer(name=table_name,datasource=self,type=type,status=ResourceStatus.New.name,last_refresh_time=now,last_modify_time=now,geoserver_setting=default_layer_geoserver_setting_json)
-    
-        table.crs = st.crs
-        table.bbox = st.bbox
-        table.spatial_type = st.spatial_type
-        sql = dbUtil.get_create_table_sql(self.schema,table_name)
-        table.last_refresh_time = timezone.now()
-        if table.pk and table.sql != sql:
-            table.last_modify_time = timezone.now()
-            table.status = table.next_status(ResourceAction.UPDATE)
-        table.save()
-        return True
 
     def save(self, force_insert=False, force_update=False, using=None, update_fields=None):
         try:
@@ -99,6 +85,13 @@ class Datasource(BorgModel,ResourceStatusManagement,SignalEnable):
                 super(Datasource,self).save(force_insert,force_update,using,update_fields)
         finally:
             self.try_clear_signal_sender("datasource_save")
+
+        if (not getattr(self,"refreshed",False)
+            and hasattr(self,"changed_fields") 
+            and (self.changed_fields == "__all__"  or any([f in self.changed_fields for f in ["host","port","db_name","schema","user","password"]]))
+            ):
+            setattr(self,"refreshed",True)
+            self.refresh_layers()
 
     def delete(self,using=None):
         logger.info('Delete {0}:{1}'.format(type(self),self.name))
@@ -111,37 +104,80 @@ class Datasource(BorgModel,ResourceStatusManagement,SignalEnable):
         finally:
             self.try_clear_signal_sender("datasource_delete")
 
-    def refresh_layers(self):
+    def _refresh_layer(self,table_name,type,time):
+        st = SpatialTable.get_instance(self.schema,table_name,refresh=True,bbox=True,crs=True)
+        if st.is_normal:
+            return False
+        try:
+            layer = Layer.objects.get(datasource=self,name=table_name)
+            layer.last_refresh_time = time
+        except Layer.DoesNotExist:
+            layer = Layer(name=table_name,datasource=self,type=type,status=ResourceStatus.New.name,last_refresh_time=time,last_modify_time=time,geoserver_setting=default_layer_geoserver_setting_json)
+    
+        layer.crs = st.crs
+        layer.bbox = json.dumps(st.bbox)
+        layer.spatial_type = st.spatial_type
+        sql = self.dbUtil.get_create_table_sql(table_name,self.schema)
+        if layer.pk and layer.sql != sql:
+            layer.last_modify_time = time
+            layer.status = layer.next_status(ResourceAction.UPDATE)
+            layer.sql = sql
+        layer.save()
+        return True
+
+    @property
+    def dbUtil(self):
+        dbUtil = getattr(self,"_dbUtil") if hasattr(self,"_dbUtil") else None
+        if not dbUtil:
+            dbUtil = DbUtil(self.db_name,self.host,self.port,self.user,self.password)
+            setattr(self,"_dbUtil",dbUtil)
+        return dbUtil
+
+    def _refresh_layers(self):
         result = None
         #modify the table data
         now = timezone.now()
-        dbUtil = DbUtil(self.db_name,self.host,self.port,self.user,self.password,self.schema)
-        tables = dbUtil.get_all_tables()
-        views = dbUtil.get_all_views()
+        tables = self.dbUtil.get_all_tables(self.schema)
+        views = self.dbUtil.get_all_views(self.schema)
         now = timezone.now()
         layers = 0
         self.try_set_signal_sender("datasource_refresh")
         try:
-            with transaction.atomic():
-                #refresh table
-                for table_name in tables:
-                    layers += self.refresh_table(table_name,"Table",time) and 1 or 0
-                #refresh views
-                for table_name in views:
-                    layers += self.refresh_table(table_name,"View",time) and 1 or 0
+            #refresh table
+            for table_name in tables:
+                layers += self._refresh_layer(table_name,"Table",now) and 1 or 0
+            #refresh views
+            for table_name in views:
+                layers += self._refresh_layer(table_name,"View",now) and 1 or 0
           
-                self.layers = layers
-                if self.layers:
-                    #set status to DELETE for layers not returned from server
-                    Layer.objects.filter(datasource=self).exclude(last_refresh_time = now).delete()
-                else:
-                    #no tables found in the server
-                    #delete all tables 
-                    Layer.objects.filter(datasource=self).delete()
-
-            self.save(update_fields=["layers","last_refresh_time"])
+            self.layers = layers
+            if self.layers:
+                #set status to DELETE for layers not returned from server
+                Layer.objects.filter(datasource=self).exclude(last_refresh_time = now).delete()
+            else:
+                #no tables found in the server
+                #delete all tables 
+                Layer.objects.filter(datasource=self).delete()
+            self.last_refresh_time = now
+            if self.pk:
+                self.save(update_fields=["layers","last_refresh_time"])
+            else:
+                self.save()
         finally:
             self.try_clear_signal_sender("datasource_refresh")
+
+    def refresh_layers(self):
+        self.try_set_signal_sender("datasource_refresh")
+        try:
+            if self.try_set_signal_sender("datasource_refresh"):
+                with transaction.atomic():
+                    self._refresh_layers();
+            else:
+                self._refresh_layers();
+
+        finally:
+            self.try_clear_signal_sender("datasource_refresh")
+
 
 
     def json_filename(self,action='publish'):
@@ -239,16 +275,16 @@ class Datasource(BorgModel,ResourceStatusManagement,SignalEnable):
 
 
 class Layer(BorgModel,ResourceStatusManagement,SignalEnable):
-    name = models.SlugField(max_length=64,null=False,editable=False)
-    datasource = models.ForeignKey(Datasource)
+    name = models.SlugField(max_length=64,null=False,editable=True)
+    datasource = models.ForeignKey(Datasource,editable=False)
     type = models.CharField(max_length=8,null=False,editable=False)
     spatial_type = models.IntegerField(default=1,editable=False)
     sql = models.TextField(null=True, editable=False)
     crs = models.CharField(max_length=64,null=True,editable=False)
     bbox = models.CharField(max_length=128,null=True,editable=False)
-    title = models.CharField(max_length=512,null=True,editable=True)
-    abstract = models.TextField(null=True,editable=True)
-    geoserver_setting = models.TextField(blank=True,null=True,editable=True)
+    title = models.CharField(max_length=512,null=True,editable=True,blank=True)
+    abstract = models.TextField(null=True,editable=True,blank=True)
+    geoserver_setting = models.TextField(blank=True,null=True,editable=False)
     status = models.CharField(max_length=32, null=False, editable=False,choices=ResourceStatus.layer_status_options)
 
     last_publish_time = models.DateTimeField(null=True,editable=False)
@@ -309,6 +345,7 @@ class Layer(BorgModel,ResourceStatusManagement,SignalEnable):
         bbox = meta_data.get("bounding_box",None)
         crs = meta_data.get("crs",None)
         #update catalog service
+        print json.dumps(meta_data)
         res = requests.post("{}/catalogue/api/records/".format(settings.CSW_URL),json=meta_data,auth=(settings.CSW_USER,settings.CSW_PASSWORD))
         res.raise_for_status()
         meta_data = res.json()
@@ -318,7 +355,7 @@ class Layer(BorgModel,ResourceStatusManagement,SignalEnable):
         meta_data["schema"] = self.datasource.schema
         meta_data["name"] = self.name
         meta_data["native_name"] = self.name
-        meta_data["store"] = self.datasource.name
+        meta_data["datastore"] = self.datasource.name
         meta_data["auth_level"] = self.datasource.workspace.auth_level
 
         meta_data["channel"] = self.datasource.workspace.publish_channel.name
@@ -371,7 +408,7 @@ class Layer(BorgModel,ResourceStatusManagement,SignalEnable):
          return True if store is removed for repository; return false, if layers does not existed in repository.
         """
         #remove it from catalogue service
-        res = requests.delete("{}/catalogue/api/records/{}:{}/".format(settings.CSW_URL,self.server.workspace.name,self.kmi_name),auth=(settings.CSW_USER,settings.CSW_PASSWORD))
+        res = requests.delete("{}/catalogue/api/records/{}:{}/".format(settings.CSW_URL,self.datasource.workspace.name,self.name),auth=(settings.CSW_USER,settings.CSW_PASSWORD))
         if res.status_code != 404:
             res.raise_for_status()
 
@@ -385,7 +422,7 @@ class Layer(BorgModel,ResourceStatusManagement,SignalEnable):
             try:
                 hg = hglib.open(BorgConfiguration.BORG_STATE_REPOSITORY)
                 hg.remove(files=json_files)
-                hg.commit(include=json_files,addremove=True, user="borgcollector", message="Remove live layer {}.{}".format(self.server.workspace.name, self.name))
+                hg.commit(include=json_files,addremove=True, user="borgcollector", message="Remove live layer {}.{}".format(self.datasource.workspace.name, self.name))
                 increase_committed_changes()
                 
                 try_push_to_repository("livelayer",hg)
@@ -484,10 +521,6 @@ class Layer(BorgModel,ResourceStatusManagement,SignalEnable):
     def __str__(self):
         return self.name
 
-
-    class Meta:
-        unique_together = (("server","name"),("server","kmi_name"))
-        ordering = ("server","name")
     class Meta:
         unique_together = (("datasource","name"),)
         ordering = ("datasource","name")
@@ -500,8 +533,8 @@ class PublishedLayer(Layer):
     objects = PublishedLayerManager
     class Meta:
         proxy = True
-        verbose_name="Live layer"
-        verbose_name_plural="Live layers"
+        verbose_name="Published layer"
+        verbose_name_plural="Published layers"
 
 class DatasourceEventListener(object):
     @staticmethod
@@ -538,12 +571,6 @@ class DatasourceEventListener(object):
                     #need to publish
                     layer.status = target_status
                     layer.save(update_fields=["status","last_publish_time"])
-
-    @staticmethod
-    @receiver(pre_save, sender=Datasource)
-    def _post_save(sender, instance, **args):
-        if hasattr(instance,"changed_fields") and (instance.changed_fields == "__all__"  or any([f in instance.changed_fields for f in ["host","port","db_name","schema","user","password"]])):
-            instance.refresh_layers()
 
 class LayerEventListener(object):
     @staticmethod

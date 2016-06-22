@@ -43,7 +43,7 @@ from borg_utils.spatial_table import SpatialTable
 from borg_utils.borg_config import BorgConfiguration
 from borg_utils.jobintervals import JobInterval
 from borg_utils.resource_status import ResourceStatus,ResourceStatusManagement
-from borg_utils.db_util import DbUtil
+from borg_utils.db_util import defaultDbUtil
 from borg_utils.signal_enable import SignalEnable
 from borg_utils.hg_batch_push import try_set_push_owner, try_clear_push_owner, increase_committed_changes, try_push_to_repository
 from borg_utils.signals import refresh_select_choices
@@ -833,7 +833,7 @@ class Input(JobFields,SignalEnable):
 
             self._populate_rowid(cursor,schema)
 
-            self.create_table_sql = DbUtil.get_create_table_sql(BorgConfiguration.TEST_INPUT_SCHEMA,self.name)
+            self.create_table_sql = defaultDbUtil.get_create_table_sql(self.name,BorgConfiguration.TEST_INPUT_SCHEMA)
 
             #import ipdb;ipdb.set_trace()
             #check the table is spatial or non spatial
@@ -2114,7 +2114,7 @@ class Publish(Transform,ResourceStatusManagement,SignalEnable):
         #drop auto generated spatial index
         #SpatialTable.get_instance(publish_schema,self.table_name,True).drop_indexes()
         #drop all indexes except primary key
-        #DbUtil.drop_all_indexes(publish_schema,self.table_name,False)
+        #defaultDbUtil.drop_all_indexes(self.table_name,publish_schema,False)
 
         sql = "CREATE OR REPLACE VIEW \"{3}\".\"{0}\" AS SELECT *, md5(CAST(row.* AS text)) as md5_rowhash FROM \"{2}\".\"{1}\"() as row;".format(self.table_name,self.func_name,trans_schema,publish_view_schema)
         cursor.execute(sql)
@@ -2203,7 +2203,7 @@ class Publish(Transform,ResourceStatusManagement,SignalEnable):
             #invoke the normalise function to check whether it is correct or not.
             self.invoke(cursor,schema,normal_schema,self.workspace.test_view_schema,self.workspace.test_schema)
 
-            self.create_table_sql = DbUtil.get_create_table_sql(self.workspace.test_schema,self.table_name)
+            self.create_table_sql = defaultDbUtil.get_create_table_sql(self.table_name,self.workspace.test_schema)
 
             #check the table is spatial or non spatial
             self.spatial_type = SpatialTable.get_instance(self.workspace.test_schema,self.table_name,True).spatial_type

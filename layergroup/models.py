@@ -72,7 +72,7 @@ class LayerGroup(models.Model,ResourceStatusManagement,SignalEnable):
             raise ValidationError("Not changed.")
  
         if o:
-            self.status = o.next_status(ResourceAction.UPDATE)
+            self.status = self.next_status(ResourceAction.UPDATE)
         else:
             self.status = ResourceStatus.NEW
             

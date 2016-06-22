@@ -28,24 +28,25 @@ WHERE np.nspname='{0}' and ct.relname='{1}'
     """
     a set of utility method to access db
     """
-    def __init__(self,name,host="127.0.0.1",port=5432,user="anonymous",password=None,default_schema="public",connection=None):
+
+    def __init__(self,name,host="127.0.0.1",port=5432,user="anonymous",password=None,connection=None):
         self._name = name or "public"
         self._host = host
         self._port = port or 5432
         self._user = user
         self._password = password
-        self._default_schema = default_schema
 
         self._env = None
         self._table_schema_dump_cmd = None
         self._connection = connection
         self._engine = None
+        self.id = "postgresql://{1}:{2}/{0}".format(self._name,self._host,self._port)
 
-    def get_create_table_sql(self,schema,table):
+    def get_create_table_sql(self,table,schema="public"):
         if not self._env:
             self._env = os.environ.copy()
             if self._password:
-                _env["PGPASSWORD"] = _database["PASSWORD"]
+                self._env["PGPASSWORD"] = _database["PASSWORD"]
 
             self._table_schema_dump_cmd = ["pg_dump", "-h", self._host, "-d", self._name, "-U", self._user, "-F", "p", "-w", "-x", "-O", "--no-security-labels", "--no-tablespaces", "-s"]
             if self._port:
@@ -54,8 +55,8 @@ WHERE np.nspname='{0}' and ct.relname='{1}'
         #get the input table structure
         f = tempfile.NamedTemporaryFile(delete=False)
         f.close()
-        cmd = DbUtil._table_schema_dump_cmd + ["-t", schema + "." + table, "-f", f.name]
-        output = subprocess.Popen(cmd,stdout=subprocess.PIPE,stderr=subprocess.PIPE, env=DbUtil._env).communicate()
+        cmd = self._table_schema_dump_cmd + ["-t", schema + "." + table, "-f", f.name]
+        output = subprocess.Popen(cmd,stdout=subprocess.PIPE,stderr=subprocess.PIPE, env=self._env).communicate()
         if output[1].strip() :
             raise Exception(output[1])
         try:
@@ -101,7 +102,7 @@ WHERE np.nspname='{0}' and ct.relname='{1}'
         try:
             result = cursor.execute(sql)
             if result:               
-                return sql_result.fetchall()
+                return result.fetchall()
             else:
                 return cursor.fetchall()
         finally:
@@ -123,7 +124,7 @@ WHERE np.nspname='{0}' and ct.relname='{1}'
                 cursor = None
 
 
-    def drop_all_indexes(self,schema,table,include_pk=False):
+    def drop_all_indexes(self,table,schema="public",include_pk=False):
         """
         drop all indexes.
         drop primary key also if include_pk is true
@@ -147,8 +148,8 @@ WHERE np.nspname='{0}' and ct.relname='{1}'
                 cursor.close()
 
 
-    def table_exists(self,table,schema=None):
-        result = self.get(self._check_table_exist_sql.format(schema or self._default_schema,table))
+    def table_exists(self,table,schema="public"):
+        result = self.get(self._check_table_exist_sql.format(schema,table))
         return result[0] and True or False
 
     def exists(self,sql):
@@ -159,13 +160,13 @@ WHERE np.nspname='{0}' and ct.relname='{1}'
         name = name.lower()
         return not any([name[:len(reserved_name)] == reserved_name for reserved_name in ["django_","spatial_ref_sys","reversion","auth","geography_columns","geometry_columns","raster_","pg_"] ])
 
-    def get_all_tables(self,schema=None):
-        rows = self.query(self._query_all_tables.format(schema=schema or self._default_schema))
+    def get_all_tables(self,schema="public"):
+        rows = self.query(self._query_all_tables.format(schema=schema))
         tables = [row[0] for row in rows if self._user_tables(row[0])]
         return tables;
 
-    def get_all_views(self,schema=None):
-        rows = self.query(self._query_all_views.format(schema=schema or self._default_schema))
+    def get_all_views(self,schema="public"):
+        rows = self.query(self._query_all_views.format(schema=schema))
         views = [row[0] for row in rows if self._user_tables(row[0])]
         return views;
 
@@ -173,17 +174,17 @@ WHERE np.nspname='{0}' and ct.relname='{1}'
 _DB_UTILS = {
 }
 
-def DbUtil(name,host="127.0.0.1",port=5432,user=None,password=None,default_schema="public",connection=None):
+def DbUtil(name,host="127.0.0.1",port=5432,user=None,password=None,connection=None):
     name = name or "public"
     port = port or 5432
     host = host or "127.0.0.1"
     dbname = "postgresql://{1}:{2}/{0}".format(name,host,port)
     if dbname not in _DB_UTILS:
-        _DB_UTILS[dbname] = _DbUtil(name,host,port,user,password,default_schema,connection)
+        _DB_UTILS[dbname] = _DbUtil(name,host,port,user,password,connection)
 
     return _DB_UTILS[dbname]
 
 
 _database = settings.DATABASES["default"]
-defaultDbUtil = DbUtil(_database["NAME"],_database["HOST"],_database.get("PORT",5432),_database["USER"],_database.get("PASSWORD"),_database.get("SCHEMA","public"),connection)
+defaultDbUtil = DbUtil(_database["NAME"],_database["HOST"],_database.get("PORT",5432),_database["USER"],_database.get("PASSWORD"),connection)
 
