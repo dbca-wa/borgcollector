@@ -84,8 +84,6 @@ class BorgModelForm(django.forms.ModelForm):
                         changed_fields.add(field)
 
                 self.instance.changed_fields = changed_fields
-                if not changed_fields:
-                    self._mode=(BorgModelForm.NOT_CHANGED,None,False,False)
             else:
                self.instance.changed_fields = "__all__"
 

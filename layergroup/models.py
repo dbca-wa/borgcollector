@@ -18,8 +18,8 @@ from django.core.validators import RegexValidator
 from tablemanager.models import Workspace,Publish
 from wmsmanager.models import WmsLayer
 from borg_utils.borg_config import BorgConfiguration
-from borg_utils.resource_status import ResourceStatus,ResourceStatusManagement,ResourceAction
-from borg_utils.signal_enable import SignalEnable
+from borg_utils.resource_status import ResourceStatus,ResourceStatusMixin,ResourceAction
+from borg_utils.transaction import TransactionMixin
 from borg_utils.signals import refresh_select_choices
 from borg_utils.hg_batch_push import try_set_push_owner, try_clear_push_owner, increase_committed_changes, try_push_to_repository
 
@@ -35,7 +35,7 @@ SRS_CHOICES = (
 class LayerGroupEmpty(Exception):
     pass
 
-class LayerGroup(models.Model,ResourceStatusManagement,SignalEnable):
+class LayerGroup(models.Model,ResourceStatusMixin,TransactionMixin):
     name = models.SlugField(max_length=128,null=False,unique=True, help_text="The name of layer group", validators=[validate_slug])
     title = models.CharField(max_length=320,null=True,blank=True)
     workspace = models.ForeignKey(Workspace, null=False)
@@ -80,24 +80,24 @@ class LayerGroup(models.Model,ResourceStatusManagement,SignalEnable):
 
     def save(self, force_insert=False, force_update=False, using=None, update_fields=None):
         try:
-            if self.try_set_signal_sender("layergroup_save"):
+            if self.try_begin_transaction("layergroup_save"):
                 with transaction.atomic():
                     super(LayerGroup,self).save(force_insert,force_update,using,update_fields)
             else:
                 super(LayerGroup,self).save(force_insert,force_update,using,update_fields)
         finally:
-            self.try_clear_signal_sender("layergroup_save")
+            self.try_clear_transaction("layergroup_save")
 
     def delete(self,using=None):
         logger.info('Delete {0}:{1}'.format(type(self),self.name))
         try:
-            if self.try_set_signal_sender("layergroup_delete"):
+            if self.try_begin_transaction("layergroup_delete"):
                 with transaction.atomic():
                     super(LayerGroup,self).delete(using)
             else:
                 super(LayerGroup,self).delete(using)
         finally:
-            self.try_clear_signal_sender("layergroup_delete")
+            self.try_clear_transaction("layergroup_delete")
 
     def check_circular_dependency(self,editing_group_layer=None,parents=None):
         """
@@ -323,7 +323,7 @@ class LayerGroup(models.Model,ResourceStatusManagement,SignalEnable):
         ordering = ["workspace","name"]
 
 
-class LayerGroupLayers(models.Model,SignalEnable):
+class LayerGroupLayers(models.Model,TransactionMixin):
     group = models.ForeignKey(LayerGroup,null=False,blank=False,related_name="group_layer")
     layer = models.ForeignKey(WmsLayer,null=True,blank=False)
     publish = models.ForeignKey(Publish,null=True,blank=True,editable=False)
@@ -372,24 +372,24 @@ class LayerGroupLayers(models.Model,SignalEnable):
 
     def save(self, force_insert=False, force_update=False, using=None, update_fields=None):
         try:
-            if self.try_set_signal_sender("layer_save"):
+            if self.try_begin_transaction("layer_save"):
                 with transaction.atomic():
                     super(LayerGroupLayers,self).save(force_insert,force_update,using,update_fields)
             else:
                 super(LayerGroupLayers,self).save(force_insert,force_update,using,update_fields)
         finally:
-            self.try_clear_signal_sender("layer_save")
+            self.try_clear_transaction("layer_save")
 
     def delete(self,using=None):
         logger.info('Delete {0}:{1}'.format(type(self),self.name))
         try:
-            if self.try_set_signal_sender("layer_delete"):
+            if self.try_begin_transaction("layer_delete"):
                 with transaction.atomic():
                     super(LayerGroupLayers,self).delete(using)
             else:
                 super(LayerGroupLayers,self).delete(using)
         finally:
-            self.try_clear_signal_sender("layer_delete")
+            self.try_clear_transaction("layer_delete")
 
     def __str__(self):
         return "group={0} , layer={1}".format(self.group,self.layer)
@@ -485,7 +485,7 @@ class LayerGroupLayersEventListener(object):
     @staticmethod
     @receiver(post_delete, sender=LayerGroupLayers)
     def _post_delete(sender, instance, **args):
-        if instance.is_signal_sender("layer_delete"):
+        if instance.is_current_transaction("layer_delete"):
             #trigged by itself
             instance.group.status = instance.group.next_status(ResourceAction.UPDATE)
             instance.group.last_modify_time = timezone.now()
@@ -494,7 +494,7 @@ class LayerGroupLayersEventListener(object):
     @staticmethod
     @receiver(post_save, sender=LayerGroupLayers)
     def _post_save(sender, instance, **args):
-        if instance.is_signal_sender("layer_save"):
+        if instance.is_current_transaction("layer_save"):
             instance.group.status = instance.group.next_status(ResourceAction.UPDATE)
             instance.group.last_modify_time = timezone.now()
             instance.group.save(update_fields=["status","last_modify_time"])

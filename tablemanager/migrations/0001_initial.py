@@ -24,7 +24,7 @@ class Migration(migrations.Migration):
             options={
                 'ordering': ['name'],
             },
-            bases=(models.Model, tablemanager.models.SignalEnable),
+            bases=(models.Model,),
         ),
         migrations.CreateModel(
             name='ForeignServer',
@@ -39,7 +39,7 @@ class Migration(migrations.Migration):
             options={
                 'ordering': ['name'],
             },
-            bases=(models.Model, tablemanager.models.SignalEnable),
+            bases=(models.Model,),
         ),
         migrations.CreateModel(
             name='ForeignTable',
@@ -53,7 +53,7 @@ class Migration(migrations.Migration):
             options={
                 'ordering': ['name'],
             },
-            bases=(models.Model, tablemanager.models.SignalEnable),
+            bases=(models.Model,),
         ),
         migrations.CreateModel(
             name='Input',
@@ -78,7 +78,7 @@ class Migration(migrations.Migration):
             options={
                 'ordering': ['data_source', 'name'],
             },
-            bases=(models.Model, tablemanager.models.SignalEnable),
+            bases=(models.Model,),
         ),
         migrations.CreateModel(
             name='Normalise',
@@ -98,7 +98,7 @@ class Migration(migrations.Migration):
             options={
                 'ordering': ['name'],
             },
-            bases=(models.Model, tablemanager.models.SignalEnable),
+            bases=(models.Model,),
         ),
         migrations.CreateModel(
             name='Normalise_NormalTable',
@@ -122,7 +122,7 @@ class Migration(migrations.Migration):
             options={
                 'ordering': ['name'],
             },
-            bases=(models.Model, tablemanager.models.SignalEnable),
+            bases=(models.Model,),
         ),
         migrations.CreateModel(
             name='Publish',
@@ -157,7 +157,7 @@ class Migration(migrations.Migration):
             options={
                 'abstract': False,
             },
-            bases=(models.Model, tablemanager.models.SignalEnable),
+            bases=(models.Model,),
         ),
         migrations.CreateModel(
             name='Publish_NormalTable',
@@ -185,7 +185,7 @@ class Migration(migrations.Migration):
             options={
                 'ordering': ['name'],
             },
-            bases=(models.Model, tablemanager.models.SignalEnable),
+            bases=(models.Model,),
         ),
         migrations.CreateModel(
             name='Replica',
@@ -211,7 +211,7 @@ class Migration(migrations.Migration):
             options={
                 'ordering': ['publish_channel', 'name'],
             },
-            bases=(models.Model, tablemanager.models.SignalEnable),
+            bases=(models.Model,),
         ),
         migrations.AlterUniqueTogether(
             name='workspace',

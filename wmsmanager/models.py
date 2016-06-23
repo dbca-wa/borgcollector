@@ -25,9 +25,9 @@ from django.core.validators import RegexValidator
 from tablemanager.models import Workspace
 from borg_utils.borg_config import BorgConfiguration
 from borg_utils.utils import file_md5
+from borg_utils.transaction import TransactionMixin
 from borg_utils.signals import refresh_select_choices,inherit_support_receiver
-from borg_utils.resource_status import ResourceStatus,ResourceStatusManagement,ResourceAction
-from borg_utils.signal_enable import SignalEnable
+from borg_utils.resource_status import ResourceStatus,ResourceStatusMixin,ResourceAction
 from borg_utils.hg_batch_push import try_set_push_owner, try_clear_push_owner, increase_committed_changes, try_push_to_repository
 
 logger = logging.getLogger(__name__)
@@ -57,7 +57,7 @@ class WmsSyncStatus(object):
     NOT_CHANGED = 'Not Changed'
     NOT_EXECUTED = 'Not Executed'
 
-class WmsServer(models.Model,ResourceStatusManagement,SignalEnable):
+class WmsServer(models.Model,ResourceStatusMixin,TransactionMixin):
     name = models.SlugField(max_length=64,null=False,editable=True,primary_key=True, help_text="The name of wms server", validators=[validate_slug])
     workspace = models.ForeignKey(Workspace, null=False,blank=False)
     capability_url = models.CharField(max_length=256,null=False,editable=True)
@@ -229,24 +229,24 @@ class WmsServer(models.Model,ResourceStatusManagement,SignalEnable):
  
     def save(self, force_insert=False, force_update=False, using=None, update_fields=None):
         try:
-            if self.try_set_signal_sender("wmsserver_save"):
+            if self.try_begin_transaction("wmsserver_save"):
                 with transaction.atomic():
                     super(WmsServer,self).save(force_insert,force_update,using,update_fields)
             else:
                 super(WmsServer,self).save(force_insert,force_update,using,update_fields)
         finally:
-            self.try_clear_signal_sender("wmsserver_save")
+            self.try_clear_transaction("wmsserver_save")
 
     def delete(self,using=None):
         logger.info('Delete {0}:{1}'.format(type(self),self.name))
         try:
-            if self.try_set_signal_sender("wmsserver_delete"):
+            if self.try_begin_transaction("wmsserver_delete"):
                 with transaction.atomic():
                     super(WmsServer,self).delete(using)
             else:
                 super(WmsServer,self).delete(using)
         finally:
-            self.try_clear_signal_sender("wmsserver_delete")
+            self.try_clear_transaction("wmsserver_delete")
 
     def json_filename(self,action='publish'):
         if action == 'publish':
@@ -335,7 +335,7 @@ class WmsServer(models.Model,ResourceStatusManagement,SignalEnable):
     def __str__(self):
         return self.name               
 
-class WmsLayer(models.Model,ResourceStatusManagement,SignalEnable):
+class WmsLayer(models.Model,ResourceStatusMixin,TransactionMixin):
     name = models.CharField(max_length=128,null=False,editable=True, help_text="The name of wms layer")
     server = models.ForeignKey(WmsServer, null=False,editable=False)
     crs = models.CharField(max_length=64,null=True,editable=False)
@@ -457,24 +457,24 @@ class WmsLayer(models.Model,ResourceStatusManagement,SignalEnable):
 
     def save(self, force_insert=False, force_update=False, using=None, update_fields=None):
         try:
-            if self.try_set_signal_sender("wmslayer_save"):
+            if self.try_begin_transaction("wmslayer_save"):
                 with transaction.atomic():
                     super(WmsLayer,self).save(force_insert,force_update,using,update_fields)
             else:
                 super(WmsLayer,self).save(force_insert,force_update,using,update_fields)
         finally:
-            self.try_clear_signal_sender("wmslayer_save")
+            self.try_clear_transaction("wmslayer_save")
 
     def delete(self,using=None):
         logger.info('Delete {0}:{1}'.format(type(self),self.name))
         try:
-            if self.try_set_signal_sender("wmslayer_delete"):
+            if self.try_begin_transaction("wmslayer_delete"):
                 with transaction.atomic():
                     super(WmsLayer,self).delete(using)
             else:
                 super(WmsLayer,self).delete(using)
         finally:
-            self.try_clear_signal_sender("wmslayer_delete")
+            self.try_clear_transaction("wmslayer_delete")
 
     def json_filename(self,action='publish'):
         if action == 'publish':

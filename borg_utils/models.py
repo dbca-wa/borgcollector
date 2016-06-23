@@ -4,6 +4,17 @@ from django.core.exceptions import ValidationError,NON_FIELD_ERRORS
 # Create your models here.
 
 class BorgModel(django.db.models.Model):
+    @property
+    def editing_mode(self):
+        return hasattr(self,"changed_fields")
+
+    @property
+    def data_changed(self):
+        if hasattr(self,"changed_fields"):
+            return getattr(self,"changed_fields")
+        else:
+            return None
+
     def full_clean(self, exclude=None, validate_unique=True, form_cleaned=True):
         """
         Calls clean_fields, clean, and validate_unique, on the model,

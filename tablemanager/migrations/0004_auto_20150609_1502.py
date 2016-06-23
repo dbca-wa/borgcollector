@@ -23,7 +23,7 @@ class Migration(migrations.Migration):
             ],
             options={
             },
-            bases=(models.Model, tablemanager.models.SignalEnable),
+            bases=(models.Model,),
         ),
         migrations.AddField(
             model_name='publish',

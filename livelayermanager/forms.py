@@ -26,7 +26,7 @@ class DatasourceForm(BorgModelForm,GeoserverSettingForm):
     max_connection_idle_time.setting_type = "geoserver_setting"
     max_connection_idle_time.key = "Max connection idle time"
 
-    fetch_size = forms.IntegerField(label="Max connection idle time",initial=1000,min_value=1)
+    fetch_size = forms.IntegerField(label="Fetch size",initial=1000,min_value=1)
     fetch_size.setting_type = "geoserver_setting"
     fetch_size.key = "fetch size"
 
@@ -38,8 +38,6 @@ class DatasourceForm(BorgModelForm,GeoserverSettingForm):
         self.get_setting_from_model(*args,**kwargs)
         super(DatasourceForm, self).__init__(*args, **kwargs)
         if 'instance' in kwargs and  kwargs['instance'] and kwargs['instance'].pk:
-            self.fields['name'].widget.attrs['readonly'] = True
-
             self.fields['workspace'].widget.attrs['readonly'] = True
 
     def _post_clean(self):
@@ -54,7 +52,7 @@ class DatasourceForm(BorgModelForm,GeoserverSettingForm):
         fields = "__all__"
 
 
-class LayerForm(forms.ModelForm,GeoserverSettingForm):
+class LayerForm(BorgModelForm,GeoserverSettingForm):
     """
     A form for Layer model
     """
@@ -72,7 +70,10 @@ class LayerForm(forms.ModelForm,GeoserverSettingForm):
         self.get_setting_from_model(*args,**kwargs)
 
         super(LayerForm, self).__init__(*args, **kwargs)
-        self.fields['name'].widget.attrs['readonly'] = True
+        self.fields['table'].widget.attrs['readonly'] = True
+        instance = kwargs.get("instance")
+        if instance and instance.is_published:
+            self.fields['name'].widget.attrs['readonly'] = True
 
     def _post_clean(self):
         if self.errors:

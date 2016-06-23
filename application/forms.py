@@ -19,9 +19,6 @@ class ApplicationForm(forms.ModelForm):
         if not self.errors:
             super(ApplicationForm,self)._post_clean()
         
-    def save(self, commit=True):
-        self.instance.enable_save_signal()
-        return super(ApplicationForm, self).save(commit)
 
     class Meta:
         model = Application
@@ -44,10 +41,6 @@ class Application_LayersForm(forms.ModelForm):
         if not self.errors:
             super(Application_LayersForm,self)._post_clean()
         
-    def save(self, commit=True):
-        self.instance.enable_save_signal()
-        return super(Application_LayersForm, self).save(commit)
-
     class Meta:
         model = Application_Layers
         fields = "__all__"

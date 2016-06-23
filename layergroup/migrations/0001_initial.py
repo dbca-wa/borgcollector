@@ -4,7 +4,6 @@ from __future__ import unicode_literals
 from django.db import models, migrations
 import django.utils.timezone
 import borg_utils.resource_status
-import borg_utils.signal_enable
 
 
 class Migration(migrations.Migration):
@@ -33,7 +32,7 @@ class Migration(migrations.Migration):
             options={
                 'ordering': ['workspace', 'name'],
             },
-            bases=(models.Model, borg_utils.resource_status.ResourceStatusManagement, borg_utils.signal_enable.SignalEnable),
+            bases=(models.Model, borg_utils.resource_status.ResourceStatusMixin),
         ),
         migrations.CreateModel(
             name='LayerGroupLayers',
@@ -50,7 +49,7 @@ class Migration(migrations.Migration):
                 'verbose_name': 'Layer group layers',
                 'verbose_name_plural': 'Layer group layers',
             },
-            bases=(models.Model, borg_utils.signal_enable.SignalEnable),
+            bases=(models.Model,),
         ),
         migrations.AlterUniqueTogether(
             name='layergrouplayers',

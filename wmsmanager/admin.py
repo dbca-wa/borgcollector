@@ -313,13 +313,6 @@ class AbstractWmsLayerAdmin(admin.ModelAdmin):
         else:
             messages.success(request, "All selected layers are processed successfully.")
 
-    def get_search_results(self,request,queryset,search_term):
-        try:
-            server = WmsServer.objects.get(pk = search_term)
-            return self.model.objects.filter(server = server).order_by("name"),False
-        except:
-            return super(AbstractWmsLayerAdmin,self).get_search_results(request,queryset,search_term)
-
     actions = ['publish','empty_gwc','unpublish']
     def get_actions(self, request):
         #import ipdb;ipdb.set_trace()

@@ -260,7 +260,7 @@ class CascadeUnpublished(ResourceStatus):
         else:
             return (self,False)
 
-class ResourceStatusManagement(object):
+class ResourceStatusMixin(object):
     """
     Based on current status and expected status, return the target status;
     """

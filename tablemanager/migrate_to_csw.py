@@ -10,7 +10,7 @@ from django.conf import settings
 
 from tablemanager.models import Publish
 from harvest.models import Job
-from borg_utils.resource_status import ResourceStatus,ResourceStatusManagement
+from borg_utils.resource_status import ResourceStatus,ResourceStatusMixin
 
 migrate_info = {}
 def migrate_all(debug=False):

@@ -22,14 +22,14 @@ class DatasourceAdmin(admin.ModelAdmin):
     readonly_fields = ("_layers","status","last_publish_time", "last_modify_time","last_unpublish_time","last_refresh_time")
     search_fields = ["name","status"]
 
-    actions = ['publish','unpublish','refresh_layers']
+    actions = ['publish','unpublish','refresh']
     ordering = ("name",)
 
     form = DatasourceForm
 
     def _layers(self,o):
         if o.layers > 0:
-            return "<a href='/livelayermanager/layer/?q={0}'>{1}</a>".format(o.name,o.layers)
+            return "<a href='/livelayermanager/layer/?q=&datasource__id__exact={0}'>{1}</a>".format(o.pk,o.layers)
         elif o.last_refresh_time:
             return "0"
         else:
@@ -38,13 +38,13 @@ class DatasourceAdmin(admin.ModelAdmin):
     _layers.short_description = "Layers"
     _layers.admin_order_field = "layers"
 
-    def refresh_layers(self,request,queryset):
+    def refresh(self,request,queryset):
         result = None
         failed_datasources = []
         for datasource in queryset:
             #modify the table data
             try:
-                datasource.refresh_layers()
+                datasource.refresh()
             except:
                 error = sys.exc_info()
                 failed_datasources.append((datasource.name,traceback.format_exc()))
@@ -55,7 +55,7 @@ class DatasourceAdmin(admin.ModelAdmin):
         else:
             messages.success(request, "Refresh successfully for all selected datasources")
 
-    refresh_layers.short_description = "Refresh Layers"
+    refresh.short_description = "Refresh"
     
     def publish(self,request,queryset):
         self._change_status(request,queryset,ResourceAction.PUBLISH,["status","last_publish_time"])
@@ -156,10 +156,10 @@ class DatasourceAdmin(admin.ModelAdmin):
         return actions 
 
 class AbstractLayerAdmin(admin.ModelAdmin):
-    list_display = ("name","_workspace","_datasource","spatial_type_desc","title","crs", "status","last_publish_time")
+    list_display = ("table","name","_workspace","_datasource","spatial_type_desc","title","crs", "status","last_publish_time","last_refresh_time")
     readonly_fields = ("_workspace","_datasource","spatial_type_desc","crs","_bounding_box", "status","_sql","last_publish_time","last_unpublish_time", "last_refresh_time","last_modify_time")
-    search_fields = ["name", "title"]
-    ordering = ("datasource","name",)
+    search_fields = ["table", "name"]
+    ordering = ("datasource","name","table")
     list_filter = ("datasource",)
 
     form = LayerForm
@@ -226,6 +226,25 @@ class AbstractLayerAdmin(admin.ModelAdmin):
     def has_delete_permission(self,request,obj=None):
         return False
 
+    def refresh(self,request,queryset):
+        result = None
+        failed_layers = []
+        for layer in queryset:
+            #modify the table data
+            try:
+                layer.refresh()
+            except:
+                error = sys.exc_info()
+                failed_layers.append((layer,traceback.format_exc()))
+                continue
+
+        if failed_layers:
+            messages.warning(request, mark_safe("Refresh failed for some selected layers:<ul>{0}</ul>".format("".join(["<li>{0} : {1}</li>".format(o[0],o[1]) for o in failed_layers]))))
+        else:
+            messages.success(request, "Refresh successfully for all selected layers")
+
+    refresh.short_description = "Refresh"
+    
     def empty_gwc(self,request,queryset):
         result = None
         failed_objects = []
@@ -236,14 +255,14 @@ class AbstractLayerAdmin(admin.ModelAdmin):
                 try:
                     if l.publish_status.unpublished:
                         #Not published before.
-                        failed_objects.append(("{0}:{1}".format(l.datasource,l.name),"Not published before, no need to empty gwc."))
+                        failed_objects.append(("{0}:{1}".format(l.datasource,l.kmi_name),"Not published before, no need to empty gwc."))
                         continue
 
                     l.empty_gwc()
                 except:
                     logger.error(traceback.format_exc())
                     error = sys.exc_info()
-                    failed_objects.append(("{0}:{1}".format(l.datasource,l.name),traceback.format_exception_only(error[0],error[1])))
+                    failed_objects.append(("{0}:{1}".format(l.datasource,l.kmi_name),traceback.format_exception_only(error[0],error[1])))
                     #remove failed, continue to process the next publish
                     continue
             try:
@@ -294,7 +313,7 @@ class AbstractLayerAdmin(admin.ModelAdmin):
                 except:
                     logger.error(traceback.format_exc())
                     error = sys.exc_info()
-                    failed_objects.append(("{0}:{1}".format(l.datasource,l.name),traceback.format_exception_only(error[0],error[1])))
+                    failed_objects.append(("{0}:{1}".format(l.datasource,l.kmi_name),traceback.format_exception_only(error[0],error[1])))
                     #remove failed, continue to process the next publish
                     continue
             try:
@@ -324,7 +343,7 @@ class AbstractLayerAdmin(admin.ModelAdmin):
         except:
             return super(AbstractLayerAdmin,self).get_search_results(request,queryset,search_term)
 
-    actions = ['publish','empty_gwc','unpublish']
+    actions = ['publish','empty_gwc','unpublish','refresh']
     def get_actions(self, request):
         #import ipdb;ipdb.set_trace()
         actions = super(AbstractLayerAdmin, self).get_actions(request)

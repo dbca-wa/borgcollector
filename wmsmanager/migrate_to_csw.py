@@ -9,7 +9,6 @@ from django.utils import timezone
 from django.conf import settings
 
 from wmsmanager.models import WmsLayer
-from borg_utils.resource_status import ResourceStatus,ResourceStatusManagement
 
 migrate_info = {}
 def migrate_all(debug=False):

@@ -31,7 +31,7 @@ class Migration(migrations.Migration):
             options={
                 'ordering': ('publish', 'name'),
             },
-            bases=(models.Model, borg_utils.resource_status.ResourceStatusManagement),
+            bases=(models.Model, borg_utils.resource_status.ResourceStatusMixin),
         ),
         migrations.AlterUniqueTogether(
             name='style',
