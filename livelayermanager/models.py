@@ -353,10 +353,33 @@ class Layer(BorgModel,ResourceStatusMixin,TransactionMixin):
         res.raise_for_status()
         meta_data = res.json()
 
+        #process styles
+        styles = meta_data.get("styles",[])
+        #filter out qml and lyr styles
+        sld_styles = [s for s in meta_data.get("styles",[]) if s["format"].lower() == "sld"]
+        meta_data["styles"] = {}
+        style_dump_dir = BorgConfiguration.LIVE_LAYER_DIR
+        if not os.path.exists(style_dump_dir):
+            os.makedirs(style_dump_dir)
+
+        for style in sld_styles:
+            if style["default"]:
+                #default sld file
+                meta_data["default_style"] = style["name"]
+            #write the style into file system
+            style_file = os.path.join(style_dump_dir,"{}.{}.sld".format(self.table_name,style["name"]))
+            with open(style_file,"wb") as f:
+                f.write(style["raw_content"].decode("base64"))
+            if md5:
+                meta_data["styles"][style["name"]] = {"file":"{}{}".format(BorgConfiguration.MASTER_PATH_PREFIX, style_file),"default":style["default"],"md5":file_md5(style_file)}
+            else:
+                meta_data["styles"][style["name"]] = {"file":"{}{}".format(BorgConfiguration.MASTER_PATH_PREFIX, style_file),"default":style["default"]}
+
         #add extra data to meta data
         meta_data["workspace"] = self.datasource.workspace.name
         meta_data["schema"] = self.datasource.schema
         meta_data["name"] = self.kmi_name
+        meta_data["table"] = self.table
         meta_data["datastore"] = self.datasource.name
         meta_data["auth_level"] = self.datasource.workspace.auth_level
 
