@@ -115,38 +115,25 @@ class Datasource(BorgModel,ResourceStatusMixin,TransactionMixin):
     def refresh(self):
         self.try_begin_transaction("datasource_refresh")
         try:
-            result = None
             #modify the table data
             now = timezone.now()
             tables = self.dbUtil.get_all_tables(self.schema)
             views = self.dbUtil.get_all_views(self.schema)
             now = timezone.now()
-            layers = 0
-            #refresh table
-            for table_name in tables:
-                try:
-                    layer = Layer.objects.get(datasource=self,table=table_name)
-                except Layer.DoesNotExist:
-                    layer = Layer(table=table_name,datasource=self,type="Table",status=ResourceStatus.New.name,geoserver_setting=default_layer_geoserver_setting_json)
-                layers += layer.refresh(now) and 1 or 0
-    
-            #refresh views
-            for table_name in views:
-                try:
-                    layer = Layer.objects.get(datasource=self,table=table_name)
-                    layer.last_refresh_time = time
-                except Layer.DoesNotExist:
-                    layer = Layer(table=table_name,datasource=self,type="View",status=ResourceStatus.New.name,geoserver_setting=default_layer_geoserver_setting_json)
-                layers += layer.refresh(now) and 1 or 0
-          
-            self.layers = layers
-            if self.layers:
-                #set status to DELETE for layers not returned from server
-                Layer.objects.filter(datasource=self).exclude(last_refresh_time = now).delete()
-            else:
-                #no tables found in the server
-                #delete all tables 
-                Layer.objects.filter(datasource=self).delete()
+
+            #refresh tables and views
+            for typename, tables in [["Table", tables],["Views", views]]:
+                for table_name in tables:
+                    layer, created = Layer.objects.get_or_create(datasource=self, table=table_name, defaults={"type": typename, "last_refresh_time": now})
+                    if (created):
+                        layer.status = ResourceStatus.New.name
+                        layer.geoserver_setting = default_layer_geoserver_setting_json
+                    layer.refresh(now)
+                    layer.save()
+                    print(layer)
+            
+            Layer.objects.filter(datasource=self).exclude(last_refresh_time=now).delete()
+            self.layers = Layer.objects.filter(datasource=self).count()
             self.last_refresh_time = now
             self.save(update_fields=["layers","last_refresh_time"])
         finally:
