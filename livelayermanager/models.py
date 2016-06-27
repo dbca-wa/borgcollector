@@ -382,6 +382,9 @@ class Layer(BorgModel,ResourceStatusMixin,TransactionMixin):
         meta_data["table"] = self.table
         meta_data["datastore"] = self.datasource.name
         meta_data["auth_level"] = self.datasource.workspace.auth_level
+        meta_data["preview_path"] = "{}{}".format(BorgConfiguration.MASTER_PATH_PREFIX, BorgConfiguration.PREVIEW_DIR)
+        meta_data["spatial_data"] = SpatialTable.check_spatial(self.spatial_type)
+        meta_data["spatial_type"] = SpatialTable.get_spatial_type_desc(self.spatial_type)
 
         meta_data["channel"] = self.datasource.workspace.publish_channel.name
         meta_data["sync_geoserver_data"] = self.datasource.workspace.publish_channel.sync_geoserver_data

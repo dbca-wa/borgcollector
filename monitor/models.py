@@ -66,6 +66,7 @@ class TaskSyncStatus(models.Model):
     task_type = models.CharField(max_length=255, null=False, editable=False,db_index=True)
     task_name = models.CharField(max_length=255, null=False, editable=False,db_index=True)
     action = models.CharField(max_length=32, null=False, editable=False,db_index=True,default='update')
+    preview_file = models.FileField(upload_to=get_preview_file_name,storage=previewFileSystemStorage,null=True,editable=False)
     sync_succeed = models.BooleanField(null=False,editable=False,default=False)
     sync_message = models.TextField(null=True,editable=False)
     sync_time = models.DateTimeField(null=True, editable=False)
@@ -76,6 +77,6 @@ class TaskSyncStatus(models.Model):
     class Meta:
         verbose_name = "Task sync status"
         verbose_name_plural = "Task sync status"
-        unique_together = (('slave_server','task_type','task_name'),)
+        unique_together = (('slave_server','task_type','task_name','action'),)
         ordering = ['sync_succeed','-sync_time']
         

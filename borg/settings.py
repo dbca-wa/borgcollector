@@ -180,6 +180,7 @@ HARVEST_CONFIG = {
     "LIVE_LAYER_DIR" : os.path.abspath(os.path.join(DOWNLOAD_ROOT, "live_layer")),
     "WMS_STORE_DIR" : os.path.abspath(os.path.join(DOWNLOAD_ROOT, "wms_store")),
     "LIVE_STORE_DIR" : os.path.abspath(os.path.join(DOWNLOAD_ROOT, "live_store")),
+    "PREVIEW_DIR" : os.path.abspath(PREVIEW_ROOT),
     "WORKSPACE_AS_SCHEMA" : True,
     "MAX_TEST_IMPORT_TIME" : 5, #seconds
     "RETRY_INTERVAL" : 300, #seconds

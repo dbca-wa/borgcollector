@@ -2537,7 +2537,7 @@ class Publish(Transform,ResourceStatusMixin):
         meta_data["spatial_type"] = SpatialTable.get_spatial_type_desc(self.spatial_type)
         meta_data["sync_postgres_data"] = self.workspace.publish_channel.sync_postgres_data
         meta_data["sync_geoserver_data"] = self.workspace.publish_channel.sync_geoserver_data
-        meta_data["preview_path"] = "{}{}".format(BorgConfiguration.MASTER_PATH_PREFIX, settings.PREVIEW_ROOT)
+        meta_data["preview_path"] = "{}{}".format(BorgConfiguration.MASTER_PATH_PREFIX, BorgConfiguration.PREVIEW_DIR)
         meta_data["auth_level"] = self.workspace.auth_level
 
         if self.geoserver_setting:
