@@ -15,6 +15,7 @@ from django.core.validators import RegexValidator
 from django.dispatch import receiver
 from django.db.models.signals import pre_save, pre_delete,post_save,post_delete
 from django.db import transaction
+from django.core.exceptions import ValidationError
 
 from tablemanager.models import Workspace
 from borg_utils.borg_config import BorgConfiguration
@@ -57,6 +58,7 @@ class Datasource(BorgModel,ResourceStatusMixin,TransactionMixin):
     user = models.CharField(max_length=32,null=True,blank=True)
     password = models.CharField(max_length=32,null=True,blank=True)
     schema = models.CharField(max_length=32,blank=False,default="public")
+    filter = models.CharField(max_length=32,blank=True,null=True)
     geoserver_setting = models.TextField(blank=True,null=True,editable=False)
     status = models.CharField(max_length=32,null=False,editable=False,choices=ResourceStatus.layer_status_options)
 
@@ -67,6 +69,8 @@ class Datasource(BorgModel,ResourceStatusMixin,TransactionMixin):
     last_unpublish_time = models.DateTimeField(null=True,editable=False)
     last_modify_time = models.DateTimeField(null=False,editable=False,default=timezone.now)
 
+    _filters = None
+
     def clean(self):
         if not self.pk:
             self.status = ResourceStatus.New.name
@@ -74,6 +78,12 @@ class Datasource(BorgModel,ResourceStatusMixin,TransactionMixin):
             #already exist
             self.status = self.next_status(ResourceAction.UPDATE)
 
+        if self.filter:
+            try:
+                [re.compile(f.strip()) for f in self.filter.split(";") if f.strip()]
+            except:
+                raise ValidationError("Invalid filter.")
+                
         self.last_modify_time = timezone.now()
 
     def save(self, force_insert=False, force_update=False, using=None, update_fields=None):
@@ -112,6 +122,16 @@ class Datasource(BorgModel,ResourceStatusMixin,TransactionMixin):
             setattr(self,"_dbUtil",dbUtil)
         return dbUtil
 
+    def filter_table(self,table):
+        if not self.filter:
+            return True
+
+        if not self._filters:
+            self._filters = [re.compile(f.strip()) for f in self.filter.split(";") if f.strip()]
+
+        return any([f.search(table) for f in self._filters])
+
+
     def refresh(self):
         self.try_begin_transaction("datasource_refresh")
         try:
@@ -121,16 +141,23 @@ class Datasource(BorgModel,ResourceStatusMixin,TransactionMixin):
             views = self.dbUtil.get_all_views(self.schema)
             now = timezone.now()
 
+        
             #refresh tables and views
             for typename, tables in [["Table", tables],["Views", views]]:
                 for table_name in tables:
-                    layer, created = Layer.objects.get_or_create(datasource=self, table=table_name, defaults={"type": typename, "last_refresh_time": now})
-                    if (created):
-                        layer.status = ResourceStatus.New.name
-                        layer.geoserver_setting = default_layer_geoserver_setting_json
+                    if not self.filter_table(table_name):
+                        continue
+                    layer, created = Layer.objects.get_or_create(datasource=self, 
+                        table=table_name, 
+                        defaults={
+                            "type": typename, 
+                            "last_refresh_time": now,
+                            "geoserver_setting":default_layer_geoserver_setting_json,
+                            "status":ResourceStatus.New.name
+                        }
+                    )
                     layer.refresh(now)
                     layer.save()
-                    print(layer)
             
             Layer.objects.filter(datasource=self).exclude(last_refresh_time=now).delete()
             self.layers = Layer.objects.filter(datasource=self).count()
@@ -240,7 +267,7 @@ class Layer(BorgModel,ResourceStatusMixin,TransactionMixin):
     type = models.CharField(max_length=8,null=False,editable=False)
     spatial_type = models.IntegerField(default=1,editable=False)
     sql = models.TextField(null=True, editable=False)
-    crs = models.CharField(max_length=64,null=True,editable=False)
+    crs = models.CharField(max_length=64,editable=False,null=True,blank=True)
     bbox = models.CharField(max_length=128,null=True,editable=False)
     name = models.CharField(max_length=256,null=True,editable=True,blank=True,unique=True)
     title = models.CharField(max_length=512,null=True,editable=True,blank=True)
@@ -252,6 +279,12 @@ class Layer(BorgModel,ResourceStatusMixin,TransactionMixin):
     last_unpublish_time = models.DateTimeField(null=True,editable=False)
     last_refresh_time = models.DateTimeField(null=False,editable=False)
     last_modify_time = models.DateTimeField(null=True,editable=False)
+
+
+    @staticmethod
+    def is_system_table(table):
+        system_table_prefixes = ("django_","auth_","reversion_","pg_")
+        return any([table[0:len(prefix)] == prefix for prefix in system_table_prefixes])
 
     def clean(self):
         self.last_modify_time = timezone.now()
@@ -265,22 +298,20 @@ class Layer(BorgModel,ResourceStatusMixin,TransactionMixin):
         self.try_begin_transaction("livelayer_refresh")
         try:
             time = time or timezone.now()
-            st = SpatialTable.get_instance(self.datasource.schema,self.table,refresh=True,bbox=True,crs=True)
-            if st.is_normal:
+            if Layer.is_system_table(self.table):
                 return False
+
+            st = SpatialTable.get_instance(self.datasource.schema,self.table,refresh=True,bbox=True,crs=True,dbUtil=self.datasource.dbUtil)
             self.last_refresh_time = time
     
             self.crs = st.crs
             self.bbox = json.dumps(st.bbox)
             self.spatial_type = st.spatial_type
             sql = self.datasource.dbUtil.get_create_table_sql(self.table,self.datasource.schema)
-            if self.pk and self.sql != sql:
+            if self.sql and self.sql != sql:
                 self.last_modify_time = time
-                self.status = layer.next_status(ResourceAction.UPDATE)
+                self.status = self.next_status(ResourceAction.UPDATE)
                 self.sql = sql
-            elif not self.pk:
-                self.last_modify_time = time
-                self.status = ResourceStatus.New.name
             self.save()
             return True
         finally:
@@ -337,6 +368,7 @@ class Layer(BorgModel,ResourceStatusMixin,TransactionMixin):
         #update catalog service
         print json.dumps(meta_data)
         res = requests.post("{}/catalogue/api/records/".format(settings.CSW_URL),json=meta_data,auth=(settings.CSW_USER,settings.CSW_PASSWORD))
+        print(res.content)
         res.raise_for_status()
         meta_data = res.json()
 

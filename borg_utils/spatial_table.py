@@ -26,7 +26,6 @@ class SpatialTable(object):
     _retrieve_bbox_sql = "SELECT public.ST_XMIN(a.bbox), public.ST_YMIN(a.bbox), public.ST_XMAX(a.bbox), public.ST_YMAX(a.bbox) FROM (SELECT public.st_extent(\"{2}\") AS bbox  FROM \"{0}\".\"{1}\") a"
     _retrieve_crs_sql = "SELECT public.ST_SRID({2}) FROM \"{0}\".\"{1}\" LIMIT 1;"
 
-    _database = (settings.DATABASES["default"])["NAME"]
     _cache = dict()
 
     _types = ['GEOMETRY','POINT','LINESTRING','POLYGON','MULTIPOINT','MULTILINESTRING','MULTIPOLYGON']
@@ -89,13 +88,13 @@ class SpatialTable(object):
     def _initialize(self):
         #not exist, reload again
         if self._dbUtil.table_exists(self._table,self._schema):
-            rows = self._dbUtil.query(SpatialTable._get_geometry_columns_sql.format(SpatialTable._database,self._schema,self._table))
+            rows = self._dbUtil.query(SpatialTable._get_geometry_columns_sql.format(self._dbUtil.database,self._schema,self._table))
             self._geometry_columns = [[x[0],x[1],None,None] for x in rows]
             
-            rows = self._dbUtil.query(SpatialTable._get_geography_columns_sql.format(SpatialTable._database,self._schema,self._table))
+            rows = self._dbUtil.query(SpatialTable._get_geography_columns_sql.format(self._dbUtil.database,self._schema,self._table))
             self._geography_columns = [[x[0],x[1],None,None] for x in rows]
             
-            rows = self._dbUtil.query(SpatialTable._get_raster_columns_sql.format(SpatialTable._database,self._schema,self._table))
+            rows = self._dbUtil.query(SpatialTable._get_raster_columns_sql.format(self._dbUtil.database,self._schema,self._table))
             self._raster_columns = [x[0] for x in rows]
 
             self._spatial_type = 0
@@ -305,4 +304,28 @@ class SpatialTable(object):
         return spatial_type > 0
             
         
+class SpatialTableMixin(object):
+    @property
+    def is_normal(self):
+        return SpatialTable.check_normal(self.spatial_type)
+    
+    @property
+    def is_spatial(self):
+        return SpatialTable.check_spatial(self.spatial_type)
+    
+    @property
+    def is_raster(self):
+        return SpatialTable.check_raster(self.spatial_type)
+    
+    @property
+    def is_geometry(self):
+        return SpatialTable.check_geometry(self.spatial_type)
+    
+    @property
+    def is_geography(self):
+        return SpatialTable.check_geography(self.spatial_type)
 
+    @property
+    def spatial_type_desc(self):
+        return SpatialTable.get_spatial_type_desc(self.spatial_type)
+    
