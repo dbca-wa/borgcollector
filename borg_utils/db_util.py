@@ -29,8 +29,8 @@ WHERE np.nspname='{0}' and ct.relname='{1}'
     a set of utility method to access db
     """
 
-    def __init__(self,name,host="127.0.0.1",port=5432,user="anonymous",password=None,connection=None):
-        self._name = name or "public"
+    def __init__(self,db,host="127.0.0.1",port=5432,user="anonymous",password=None,connection=None):
+        self._db = db
         self._host = host
         self._port = port or 5432
         self._user = user
@@ -40,7 +40,11 @@ WHERE np.nspname='{0}' and ct.relname='{1}'
         self._table_schema_dump_cmd = None
         self._connection = connection
         self._engine = None
-        self.id = "postgresql://{1}:{2}/{0}".format(self._name,self._host,self._port)
+        self.id = "postgresql://{1}:{2}/{0}".format(self._db,self._host,self._port)
+
+    @property
+    def database(self):
+        return self._db;
 
     def get_create_table_sql(self,table,schema="public"):
         if not self._env:
@@ -48,7 +52,7 @@ WHERE np.nspname='{0}' and ct.relname='{1}'
             if self._password:
                 self._env["PGPASSWORD"] = _database["PASSWORD"]
 
-            self._table_schema_dump_cmd = ["pg_dump", "-h", self._host, "-d", self._name, "-U", self._user, "-F", "p", "-w", "-x", "-O", "--no-security-labels", "--no-tablespaces", "-s"]
+            self._table_schema_dump_cmd = ["pg_dump", "-h", self._host, "-d", self._db, "-U", self._user, "-F", "p", "-w", "-x", "-O", "--no-security-labels", "--no-tablespaces", "-s"]
             if self._port:
                 self._table_schema_dump_cmd += ["-p", str(self._port)]
 
@@ -67,13 +71,12 @@ WHERE np.nspname='{0}' and ct.relname='{1}'
                 reader.close()
             os.unlink(f.name)
 
-
     def cursor(self):
         if self._connection:
             return self._connection.cursor()
         else:
             if not self._engine:
-                self._engine =  create_engine("postgresql://{3}:{4}@{1}:{2}/{0}".format(self._name,self._host,self._port,self._user,self._password))
+                self._engine =  create_engine("postgresql://{3}:{4}@{1}:{2}/{0}".format(self._db,self._host,self._port,self._user,self._password))
             return self._engine.connect()
 
     def get(self,sql,cursor=None):
@@ -174,15 +177,14 @@ WHERE np.nspname='{0}' and ct.relname='{1}'
 _DB_UTILS = {
 }
 
-def DbUtil(name,host="127.0.0.1",port=5432,user=None,password=None,connection=None):
-    name = name or "public"
+def DbUtil(db,host="127.0.0.1",port=5432,user=None,password=None,connection=None):
     port = port or 5432
     host = host or "127.0.0.1"
-    dbname = "postgresql://{1}:{2}/{0}".format(name,host,port)
-    if dbname not in _DB_UTILS:
-        _DB_UTILS[dbname] = _DbUtil(name,host,port,user,password,connection)
+    db_id = "postgresql://{1}:{2}/{0}".format(db,host,port)
+    if db_id not in _DB_UTILS:
+        _DB_UTILS[db_id] = _DbUtil(db,host,port,user,password,connection)
 
-    return _DB_UTILS[dbname]
+    return _DB_UTILS[db_id]
 
 
 _database = settings.DATABASES["default"]

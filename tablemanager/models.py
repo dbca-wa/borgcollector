@@ -39,7 +39,7 @@ from codemirror import CodeMirrorTextarea
 from sqlalchemy import create_engine
 
 from borg_utils.gdal import detect_epsg
-from borg_utils.spatial_table import SpatialTable
+from borg_utils.spatial_table import SpatialTable,SpatialTableMixin
 from borg_utils.borg_config import BorgConfiguration
 from borg_utils.jobintervals import JobInterval
 from borg_utils.resource_status import ResourceStatus,ResourceStatusMixin
@@ -1959,7 +1959,7 @@ STATUS_CHOICES = (
     (3, "failed")
 )
 
-class Publish(Transform,ResourceStatusMixin):
+class Publish(Transform,ResourceStatusMixin,SpatialTableMixin):
     """
     A feature, whose data is derived from input and normal table, will be published to slave server and then can be accessed through kmi.
     """
@@ -2031,7 +2031,7 @@ class Publish(Transform,ResourceStatusMixin):
         return PublishAction(self.pending_actions)
 
     def builtin_style_file(self,style_format="sld"):
-        if SpatialTable.check_normal(self.spatial_type):
+        if self.is_normal:
             #is a normal table, no style file
             return None
         elif self.input_table and self.input_table.spatial_type == self.spatial_type  and self.input_table.style_file(style_format):
@@ -2428,9 +2428,9 @@ class Publish(Transform,ResourceStatusMixin):
         meta_data = {}
         meta_data["workspace"] = self.workspace.name
         meta_data["name"] = self.table_name
-        if SpatialTable.check_normal(self.spatial_type) or not self.workspace.publish_channel.sync_geoserver_data:
-            meta_data["service_type"] = ""
-        elif SpatialTable.check_raster(self.spatial_type):
+        if self.is_normal:
+            meta_data["service_type"] = "WFS"
+        elif self.is_raster:
             meta_data["service_type"] = "WMS"
             meta_data["service_type_version"] = self.workspace.publish_channel.wms_version
         else:
@@ -2457,7 +2457,7 @@ class Publish(Transform,ResourceStatusMixin):
         meta_data["modified"] = modify_time.astimezone(timezone.get_default_timezone()).strftime("%Y-%m-%d %H:%M:%S.%f")
 
         #bbox
-        if SpatialTable.check_spatial(self.spatial_type):
+        if self.is_spatial:
             cursor=connection.cursor()
             st = SpatialTable.get_instance(self.workspace.schema,self.table_name,bbox=True,crs=True)
             if st.spatial_column:
@@ -2478,7 +2478,7 @@ class Publish(Transform,ResourceStatusMixin):
             meta_data["ows_resource"]["wfs_version"] = self.workspace.publish_channel.wfs_version
             meta_data["ows_resource"]["wfs_endpoint"] = self.workspace.publish_channel.wfs_endpoint
 
-        if meta_data["service_type"] in ("WFS","WMS") and self.workspace.publish_channel.wfs_endpoint:
+        if meta_data["service_type"] in ("WFS","WMS") and self.workspace.publish_channel.wfs_endpoint and self.is_spatial:
             meta_data["ows_resource"]["wms"] = True
             meta_data["ows_resource"]["wms_version"] = self.workspace.publish_channel.wms_version
             meta_data["ows_resource"]["wms_endpoint"] = self.workspace.publish_channel.wms_endpoint
@@ -2487,8 +2487,6 @@ class Publish(Transform,ResourceStatusMixin):
             if geo_settings.get("create_cache_layer",False) and self.workspace.publish_channel.gwc_endpoint:
                 meta_data["ows_resource"]["gwc"] = True
                 meta_data["ows_resource"]["gwc_endpoint"] = self.workspace.publish_channel.gwc_endpoint
-
-
 
         return meta_data
 
@@ -2499,32 +2497,35 @@ class Publish(Transform,ResourceStatusMixin):
         bbox = meta_data.get("bounding_box",None)
         crs = meta_data.get("crs",None)
         #update catalog service
-        res = requests.post("{}/catalogue/api/records/?style_content=true".format(settings.CSW_URL),json=meta_data,auth=(settings.CSW_USER,settings.CSW_PASSWORD))
-        res.raise_for_status()
-        meta_data = res.json()
-        #process styles
-        styles = meta_data.get("styles",[])
-        #filter out qml and lyr styles
-        sld_styles = [s for s in meta_data.get("styles",[]) if s["format"].lower() == "sld"]
-        meta_data["styles"] = sld_styles
-        if style_dump_dir:
-            meta_data["styles"] = {}
-            if not os.path.exists(style_dump_dir):
-                os.makedirs(style_dump_dir)
-
-        for style in sld_styles:
-            if style["default"]:
-                #default sld file
-                meta_data["default_style"] = style["name"]
+        if self.workspace.publish_channel.sync_geoserver_data:
+            res = requests.post("{}/catalogue/api/records/?style_content=true".format(settings.CSW_URL),json=meta_data,auth=(settings.CSW_USER,settings.CSW_PASSWORD))
+            if 400 <= res.status_code < 600 and res.content:
+                res.reason = "{}({})".format(res.reason,res.content)
+            res.raise_for_status()
+            meta_data = res.json()
+            #process styles
+            styles = meta_data.get("styles",[])
+            #filter out qml and lyr styles
+            sld_styles = [s for s in meta_data.get("styles",[]) if s["format"].lower() == "sld"]
+            meta_data["styles"] = sld_styles
             if style_dump_dir:
-                #write the style into file system
-                style_file = os.path.join(style_dump_dir,"{}.{}.sld".format(self.table_name,style["name"]))
-                with open(style_file,"wb") as f:
-                    f.write(style["raw_content"].decode("base64"))
-                if md5:
-                    meta_data["styles"][style["name"]] = {"file":"{}{}".format(BorgConfiguration.MASTER_PATH_PREFIX, style_file),"default":style["default"],"md5":file_md5(style_file)}
-                else:
-                    meta_data["styles"][style["name"]] = {"file":"{}{}".format(BorgConfiguration.MASTER_PATH_PREFIX, style_file),"default":style["default"]}
+                meta_data["styles"] = {}
+                if not os.path.exists(style_dump_dir):
+                    os.makedirs(style_dump_dir)
+
+            for style in sld_styles:
+                if style["default"]:
+                    #default sld file
+                    meta_data["default_style"] = style["name"]
+                if style_dump_dir:
+                    #write the style into file system
+                    style_file = os.path.join(style_dump_dir,"{}.{}.sld".format(self.table_name,style["name"]))
+                    with open(style_file,"wb") as f:
+                        f.write(style["raw_content"].decode("base64"))
+                    if md5:
+                        meta_data["styles"][style["name"]] = {"file":"{}{}".format(BorgConfiguration.MASTER_PATH_PREFIX, style_file),"default":style["default"],"md5":file_md5(style_file)}
+                    else:
+                        meta_data["styles"][style["name"]] = {"file":"{}{}".format(BorgConfiguration.MASTER_PATH_PREFIX, style_file),"default":style["default"]}
 
         #add extra data to meta data
         meta_data["workspace"] = self.workspace.name
@@ -2533,8 +2534,8 @@ class Publish(Transform,ResourceStatusMixin):
         meta_data["data_schema"] = self.workspace.publish_data_schema
         meta_data["outdated_schema"] = self.workspace.publish_outdated_schema
         meta_data["channel"] = self.workspace.publish_channel.name
-        meta_data["spatial_data"] = SpatialTable.check_spatial(self.spatial_type)
-        meta_data["spatial_type"] = SpatialTable.get_spatial_type_desc(self.spatial_type)
+        meta_data["spatial_data"] = self.is_spatial
+        meta_data["spatial_type"] = self.spatial_type_desc
         meta_data["sync_postgres_data"] = self.workspace.publish_channel.sync_postgres_data
         meta_data["sync_geoserver_data"] = self.workspace.publish_channel.sync_geoserver_data
         meta_data["preview_path"] = "{}{}".format(BorgConfiguration.MASTER_PATH_PREFIX, BorgConfiguration.PREVIEW_DIR)
@@ -2546,7 +2547,7 @@ class Publish(Transform,ResourceStatusMixin):
         #bbox
         if "bounding_box" in meta_data:
             del meta_data["bounding_box"]
-        if SpatialTable.check_spatial(self.spatial_type):
+        if self.is_spatial:
             meta_data["bbox"] = bbox
             meta_data["crs"] = crs
 
