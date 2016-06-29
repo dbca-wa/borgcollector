@@ -286,7 +286,7 @@ class Command(BaseCommand):
         while(True):
             min_next_run_time = None
             now = timezone.now()
-            RepeatedJob.job_batch_id = Daily.instance().job_batch_id(now)
+            RepeatedJob.job_batch_id = JobInterval.Daily.job_batch_id(now)
             for job in jobs:
                 next_run_time = job.run(now)
                 if min_next_run_time:
