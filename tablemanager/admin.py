@@ -14,7 +14,7 @@ from reversion.admin import VersionAdmin
 
 from tablemanager.models import (
     ForeignTable, Input, NormalTable,
-    Normalise, Workspace, Publish, Replica,
+    Normalise, Workspace, Publish,
     Normalise_NormalTable,
     PublishChannel,DataSource,DatasourceType
 )
@@ -639,7 +639,7 @@ class PublishAdmin(VersionAdmin,JobFields):
         if obj and SpatialTable.check_normal(obj.spatial_type):
             base_fields = ['name','workspace','interval','status','input_table','dependents','priority','sql','create_extra_index_sql']
         else:
-            base_fields = ['name','workspace','interval','status','input_table','dependents','priority','kmi_title','kmi_abstract','sql','create_extra_index_sql',"create_cache_layer","server_cache_expire","client_cache_expire"]
+            base_fields = ['name','workspace','interval','status','input_table','dependents','priority','sql','create_extra_index_sql',"create_cache_layer","server_cache_expire","client_cache_expire"]
         return base_fields + list(self.get_readonly_fields(request, obj))
 
     def _workspace(self,o):
