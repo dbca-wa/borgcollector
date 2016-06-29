@@ -164,19 +164,12 @@ class WmsServer(models.Model,ResourceStatusMixin,TransactionMixin):
             if existed_layer:
                 #layer already existed
                 changed = False
-                if existed_layer.title != layer_title_element.text:
-                    existed_layer.title = layer_title_element.text
-                    if not existed_layer.kmi_title:
-                        changed = True
-                if layer_abstract_element is not None :
-                    if existed_layer.abstract != layer_abstract_element.text:
-                        existed_layer.abstract = layer_abstract_element.text
-                        if not existed_layer.kmi_abstract:
-                            changed = True
-                else:
-                    if existed_layer.abstract and not existed_layer.kmi_abstract:
-                        changed = True
-                    existed_layer.abstract = None
+                if existed_layer.title != (layer_title_element.text if layer_title_element else None):
+                    existed_layer.title = layer_title_element.text if layer_title_element else None
+                    changed = True
+                if existed_layer.abstract != (layer_abstract_element.text if layer_abstract_element else None):
+                    existed_layer.abstract = layer_abstract_element.text if layer_abstract_element else None
+                    changed = True
                 
                 if existed_layer.crs != crs:
                     existed_layer.crs = crs
@@ -348,8 +341,6 @@ class WmsLayer(models.Model,ResourceStatusMixin,TransactionMixin):
     title = models.CharField(max_length=512,null=True,editable=False)
     abstract = models.TextField(null=True,editable=False)
     kmi_name = models.SlugField(max_length=128,null=False,editable=True,blank=False, validators=[validate_slug])
-    kmi_title = models.CharField(max_length=512,null=True,editable=True,blank=True)
-    kmi_abstract = models.TextField(null=True,editable=True,blank=True)
     path = models.CharField(max_length=512,null=True,editable=False)
     applications = models.TextField(blank=True,null=True,editable=False)
     geoserver_setting = models.TextField(blank=True,null=True,editable=False)
@@ -360,19 +351,9 @@ class WmsLayer(models.Model,ResourceStatusMixin,TransactionMixin):
     last_modify_time = models.DateTimeField(null=True,editable=False)
 
 
-    @property
-    def layer_title(self):
-        return self.kmi_title or self.title
- 
-    @property
-    def layer_abstract(self):
-        return self.kmi_abstract or self.abstract
- 
     def clean(self):
         #import ipdb;ipdb.set_trace()
-        self.kmi_title = self.kmi_title.strip() if self.kmi_title and self.kmi_title.strip() else None
-        self.kmi_name = self.kmi_name.strip() if self.kmi_name and self.kmi_name.strip() else None
-        self.kmi_abstract = self.kmi_abstract.strip() if self.kmi_abstract and self.kmi_abstract.strip() else None
+        self.kmi_name = (self.kmi_name.strip() if self.kmi_name else None) or None
         try:
             o = WmsLayer.objects.get(pk=self.pk)
         except ObjectDoesNotExist:
@@ -381,8 +362,6 @@ class WmsLayer(models.Model,ResourceStatusMixin,TransactionMixin):
         if (o 
             and o.name == self.name 
             and o.kmi_name == self.kmi_name 
-            and o.kmi_title == self.kmi_title
-            and o.kmi_abstract == self.kmi_abstract
             and o.server == self.server
             and o.title == self.title
             and o.path == self.path

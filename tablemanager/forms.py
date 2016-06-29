@@ -303,5 +303,5 @@ class PublishForm(BorgModelForm,GeoserverSettingForm):
 
     class Meta:
         model = Publish
-        fields = ('name','workspace','interval','status','input_table','dependents','priority','kmi_title','kmi_abstract','sql','create_extra_index_sql')
+        fields = ('name','workspace','interval','status','input_table','dependents','priority','sql','create_extra_index_sql')
 
