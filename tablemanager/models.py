@@ -39,12 +39,11 @@ from codemirror import CodeMirrorTextarea
 from sqlalchemy import create_engine
 
 from borg_utils.gdal import detect_epsg
-from borg_utils.spatial_table import SpatialTable
+from borg_utils.spatial_table import SpatialTable,SpatialTableMixin
 from borg_utils.borg_config import BorgConfiguration
-from borg_utils.jobintervals import JobInterval,Weekly,Triggered
-from borg_utils.resource_status import ResourceStatus,ResourceStatusManagement
-from borg_utils.db_util import DbUtil
-from borg_utils.signal_enable import SignalEnable
+from borg_utils.jobintervals import JobInterval
+from borg_utils.resource_status import ResourceStatus,ResourceStatusMixin
+from borg_utils.db_util import defaultDbUtil
 from borg_utils.hg_batch_push import try_set_push_owner, try_clear_push_owner, increase_committed_changes, try_push_to_repository
 from borg_utils.signals import refresh_select_choices
 from borg_utils.models import BorgModel
@@ -53,8 +52,8 @@ from borg_utils.utils import file_md5
 logger = logging.getLogger(__name__)
 
   
-slug_re = re.compile(r'^[a-z0-9_]+$')
-validate_slug = RegexValidator(slug_re, "Slug can only contain lowercase letters, numbers and underscores", "invalid")
+slug_re = re.compile(r'^[a-z_][a-z0-9_]+$')
+validate_slug = RegexValidator(slug_re, "Slug can only start with lowercase letters or underscore, and contain lowercase letters, numbers and underscore", "invalid")
 
 def in_schema(search, db_url=None,input_schema=None,trans_schema=None,normal_schema=None):
     if db_url:
@@ -182,14 +181,16 @@ class JobFields(BorgModel):
 class DatasourceType(object):
     FILE_SYSTEM = "FileSystem"
     DATABASE = "Database"
+    MUDMAP = "Mudmap"
 
     options = (
         (FILE_SYSTEM,FILE_SYSTEM),
-        (DATABASE,DATABASE)
+        (DATABASE,DATABASE),
+        (MUDMAP,MUDMAP)
     )
 
 @python_2_unicode_compatible
-class DataSource(BorgModel,SignalEnable):
+class DataSource(BorgModel):
     """
     Represents a data source which the input is belonging to
 
@@ -201,7 +202,7 @@ class DataSource(BorgModel,SignalEnable):
     password = models.CharField(max_length=320,null=True,blank=True)
     sql = SQLField(null=True,blank=True)
     vrt = XMLField(help_text="GDAL VRT template in xml", default="")
-    last_modify_time = models.DateTimeField(auto_now=False,auto_now_add=True,editable=False,default=timezone.now,null=False)
+    last_modify_time = models.DateTimeField(auto_now=False,auto_now_add=True,editable=False,null=False)
 
     def drop(self,cursor,schema,name):
         """
@@ -287,6 +288,7 @@ class DataSource(BorgModel,SignalEnable):
             super(DataSource,self).delete(using)
 
     def save(self, force_insert=False, force_update=False, using=None, update_fields=None):
+        if not self.data_changed: return
         with transaction.atomic():
             super(DataSource,self).save(force_insert,force_update,using,update_fields)
 
@@ -308,7 +310,7 @@ class DataSourceEventListener(object):
         if not instance.pk:
             instance.new_object = True
 
-        if not instance.save_signal_guard():
+        if not instance.editing_mode:
             return
         instance.execute()
 
@@ -334,7 +336,7 @@ class DataSourceEventListener(object):
 
 
 @python_2_unicode_compatible
-class ForeignTable(BorgModel,SignalEnable):
+class ForeignTable(BorgModel):
     """
     Represents a table to be harvested via a foreign data wrapper. Data will be
     proxied by adding a server and foreign table record to the Postgres
@@ -346,7 +348,7 @@ class ForeignTable(BorgModel,SignalEnable):
     name = models.SlugField(max_length=255, unique=True, help_text="The name of foreign table", validators=[validate_slug])
     server = models.ForeignKey(DataSource,limit_choices_to={"type":DatasourceType.DATABASE})
     sql = SQLField(default="CREATE FOREIGN TABLE \"{{schema}}\".\"{{self.name}}\" () SERVER {{self.server.name}} OPTIONS (schema '<schema>', table '<table>');")
-    last_modify_time = models.DateTimeField(auto_now=False,auto_now_add=True,editable=False,default=timezone.now,null=False)
+    last_modify_time = models.DateTimeField(auto_now=False,auto_now_add=True,editable=False,null=False)
 
     ROW_COUNT_SQL = "SELECT COUNT(*) FROM \"{0}\".\"{1}\";"
     TABLE_MD5_SQL = "SELECT md5(string_agg(md5(CAST(t.* as text)),',')) FROM (SELECT *  from \"{0}\".\"{1}\") as t;"
@@ -439,6 +441,7 @@ class ForeignTable(BorgModel,SignalEnable):
             super(ForeignTable,self).delete(using)
 
     def save(self, force_insert=False, force_update=False, using=None, update_fields=None):
+        if not self.data_changed: return
         with transaction.atomic():
             super(ForeignTable,self).save(force_insert,force_update,using,update_fields)
 
@@ -464,7 +467,7 @@ class ForeignTableEventListener(object):
         if not instance.pk:
             instance.new_object = True
 
-        if not instance.save_signal_guard():
+        if not instance.editing_mode:
             return
         try:
             instance.execute()
@@ -491,13 +494,13 @@ class ForeignTableEventListener(object):
     def _post_delete(sender, instance, **args):
         refresh_select_choices.send(instance,choice_family="foreigntable")
 
-class Input(JobFields,SignalEnable):
+class Input(JobFields):
     """
     Represents an input table in the harvest DB. Also contains source info
     (as a GDAL VRT definition) so it can be loaded using the OGR toolset.
     """
     name = models.SlugField(max_length=255, unique=True, help_text="Name of table in harvest DB", validators=[validate_slug])
-    data_source = models.ForeignKey(DataSource)
+    data_source = models.ForeignKey(DataSource,limit_choices_to={"type__in":[DatasourceType.FILE_SYSTEM,DatasourceType.DATABASE]})
     foreign_table = models.ForeignKey(ForeignTable, null=True, blank=True, help_text="Foreign table to update VRT from")
     generate_rowid = models.BooleanField(null=False, default=False, help_text="If true, a _rowid column will be added and filled with row data's hash value")
     source = DatasourceField(help_text="GDAL VRT definition in xml", unique=True)
@@ -506,7 +509,7 @@ class Input(JobFields,SignalEnable):
     spatial_type = models.IntegerField(default=1,editable=False)
     create_table_sql = models.TextField(null=True, editable=False)
     importing_info = models.TextField(max_length=255, null=True, editable=False)
-    last_modify_time = models.DateTimeField(auto_now=False,auto_now_add=True,editable=False,default=timezone.now,null=False)
+    last_modify_time = models.DateTimeField(auto_now=False,auto_now_add=True,editable=False,null=False)
     ds_modify_time = models.DateTimeField(editable=False,null=True)
 
     ABSTRACT_TEMPLATE = """{% if info_dict.abstract %}{{ info_dict.abstract }}
@@ -543,13 +546,15 @@ class Input(JobFields,SignalEnable):
             self._datasource = None
         return self._datasource
 
-    _style_file = {"sld":'N/A',"qml":"N/A","lyr":"N/A"}
     def style_file(self,style_format="sld"):
         """
         Return the style file
         if data source is not a shape file or style file does not exist, return None
         """
         #import ipdb;ipdb.set_trace()
+        if not hasattr(self,"_style_file"):
+            self._style_file = {"sld":'N/A',"qml":"N/A","lyr":"N/A"}
+
         if self._style_file[style_format] == 'N/A':
             if self.datasource:
                 #datasource has valid value
@@ -697,7 +702,7 @@ class Input(JobFields,SignalEnable):
                 if self.foreign_table:
                     if not job:
                         return None
-                    elif job.job_type == Triggered.instance().name:
+                    elif job.job_type == JobInterval.Triggered.name:
                         return False
                     elif job.batch_id:
                         if "table_md5" in self.importing_dict and "row_count" in self.importing_dict:
@@ -829,11 +834,11 @@ class Input(JobFields,SignalEnable):
 
             self._populate_rowid(cursor,schema)
 
-            self.create_table_sql = DbUtil.get_create_table_sql(BorgConfiguration.TEST_INPUT_SCHEMA,self.name)
+            self.create_table_sql = defaultDbUtil.get_create_table_sql(self.name,BorgConfiguration.TEST_INPUT_SCHEMA)
 
             #import ipdb;ipdb.set_trace()
             #check the table is spatial or non spatial
-            self.spatial_type = SpatialTable.get_instance(cursor,schema,self.name,True).spatial_type
+            self.spatial_type = SpatialTable.get_instance(schema,self.name,True).spatial_type
         except ValidationError as e:
             raise e
         except Exception as e:
@@ -1146,6 +1151,7 @@ class Input(JobFields,SignalEnable):
             super(Input,self).delete(using)
 
     def save(self, force_insert=False, force_update=False, using=None, update_fields=None):
+        if not self.data_changed: return
         with transaction.atomic():
             super(Input,self).save(force_insert,force_update,using,update_fields)
 
@@ -1188,7 +1194,7 @@ class Transform(JobFields):
     Base class for a generic transform to be performed on an Input table in
     the harvest DB.
     """
-    last_modify_time = models.DateTimeField(auto_now=False,auto_now_add=True,editable=False,default=timezone.now,null=False)
+    last_modify_time = models.DateTimeField(auto_now=False,auto_now_add=True,editable=False,null=False)
 
     def drop(self, cursor,schema):
         """
@@ -1226,7 +1232,7 @@ class Transform(JobFields):
         abstract = True
 
 
-class Normalise(Transform,SignalEnable):
+class Normalise(Transform):
     """
     Represents a normalisation transform to be performed on an Input table
     in the harvest DB.
@@ -1476,6 +1482,7 @@ class Normalise(Transform,SignalEnable):
             super(Normalise,self).delete(using)
 
     def save(self, force_insert=False, force_update=False, using=None, update_fields=None):
+        if not self.data_changed: return
         with transaction.atomic():
             super(Normalise,self).save(force_insert,force_update,using,update_fields)
 
@@ -1497,7 +1504,7 @@ class NormaliseEventListener(object):
     @staticmethod
     @receiver(pre_save, sender=Normalise)
     def _pre_save(sender, instance, **args):
-        if not instance.save_signal_guard():
+        if not instance.editing_mode:
             return
         #import ipdb;ipdb.set_trace()
         #save relationship first
@@ -1524,7 +1531,7 @@ class NormaliseEventListener(object):
     @receiver(post_save, sender=Normalise)
     def _post_save(sender, instance, **args):
         #import ipdb;ipdb.set_trace()
-        if not instance.save_signal_enabled():
+        if not instance.editing_mode:
             return
 
         #save normal table's foreign key
@@ -1558,7 +1565,7 @@ class NormaliseEventListener(object):
                 relation.normalise = instance
                 relation.save()
 
-class NormalTable(BorgModel,SignalEnable):
+class NormalTable(BorgModel):
     """
     Represents a table in the harvest DB generated by a Normalise operation on
     an Input table, with associated constraints.
@@ -1566,7 +1573,7 @@ class NormalTable(BorgModel,SignalEnable):
     name = models.CharField(unique=True, max_length=255, validators=[validate_slug])
     normalise = models.OneToOneField(Normalise,null=True,editable=False)
     create_sql = SQLField(default="CREATE TABLE \"{{self.name}}\" (name varchar(32) unique);")
-    last_modify_time = models.DateTimeField(auto_now=False,auto_now_add=True,editable=False,default=timezone.now,null=False)
+    last_modify_time = models.DateTimeField(auto_now=False,auto_now_add=True,editable=False,null=False)
 
     def is_up_to_date(self,job=None,enforce=False):
         """
@@ -1650,6 +1657,7 @@ class NormalTable(BorgModel,SignalEnable):
             super(NormalTable,self).delete(using)
 
     def save(self, force_insert=False, force_update=False, using=None, update_fields=None):
+        if not self.data_changed: return
         with transaction.atomic():
             super(NormalTable,self).save(force_insert,force_update,using,update_fields)
 
@@ -1712,7 +1720,7 @@ class Normalise_NormalTable(BorgModel):
         else:
             return self.normalise.name if self.normalise else ""
 
-class PublishChannel(BorgModel,SignalEnable):
+class PublishChannel(BorgModel):
     """
     The publish channel
     """
@@ -1724,7 +1732,7 @@ class PublishChannel(BorgModel,SignalEnable):
     wms_version = models.CharField(max_length=32, null=True,blank=True)
     wms_endpoint = models.CharField(max_length=256, null=True,blank=True)
     gwc_endpoint = models.CharField(max_length=256, null=True,blank=True)
-    last_modify_time = models.DateTimeField(auto_now=False,auto_now_add=True,editable=False,default=timezone.now,null=False)
+    last_modify_time = models.DateTimeField(auto_now=False,auto_now_add=True,editable=False,null=False)
 
     def delete(self,using=None):
         logger.info('Delete {0}:{1}'.format(type(self),self.name))
@@ -1746,6 +1754,7 @@ class PublishChannel(BorgModel,SignalEnable):
 
 
     def save(self, force_insert=False, force_update=False, using=None, update_fields=None):
+        if not self.data_changed: return
         with transaction.atomic():
             super(PublishChannel,self).save(force_insert,force_update,using,update_fields)
 
@@ -1756,7 +1765,7 @@ class PublishChannel(BorgModel,SignalEnable):
         ordering = ['name']
 
 @python_2_unicode_compatible
-class Workspace(BorgModel,SignalEnable):
+class Workspace(BorgModel):
     """
     Analogous to a workspace in GeoServer.
     """
@@ -1913,6 +1922,7 @@ class Workspace(BorgModel,SignalEnable):
             super(Workspace,self).delete(using)
 
     def save(self, force_insert=False, force_update=False, using=None, update_fields=None):
+        if not self.data_changed: return
         with transaction.atomic():
             super(Workspace,self).save(force_insert,force_update,using,update_fields)
 
@@ -1949,7 +1959,7 @@ STATUS_CHOICES = (
     (3, "failed")
 )
 
-class Publish(Transform,ResourceStatusManagement,SignalEnable):
+class Publish(Transform,ResourceStatusMixin,SpatialTableMixin):
     """
     A feature, whose data is derived from input and normal table, will be published to slave server and then can be accessed through kmi.
     """
@@ -1961,7 +1971,7 @@ class Publish(Transform,ResourceStatusManagement,SignalEnable):
 
     name = models.SlugField(max_length=255, unique=True, help_text="Name of Publish", validators=[validate_slug])
     workspace = models.ForeignKey(Workspace)
-    interval = models.CharField(max_length=64, choices=JobInterval.publish_options(), default=Weekly.instance().name)
+    interval = models.CharField(max_length=64, choices=JobInterval.publish_options(), default=JobInterval.Weekly.name)
     status = models.CharField(max_length=32, choices=ResourceStatus.publish_status_options,default=ResourceStatus.Enabled.name)
     kmi_title = models.CharField(max_length=512,null=True,editable=True,blank=True)
     kmi_abstract = models.TextField(null=True,editable=True,blank=True)
@@ -1970,7 +1980,7 @@ class Publish(Transform,ResourceStatusManagement,SignalEnable):
     spatial_type = models.IntegerField(default=1,editable=False)
     create_extra_index_sql = SQLField(null=True, editable=True,blank=True)
     priority = models.PositiveIntegerField(default=1000)
-    default_style = models.ForeignKey('Style',null=True,on_delete=models.SET_NULL,related_name="+")
+    default_style = models.ForeignKey('Style',null=True,on_delete=models.SET_NULL,related_name="+",blank=True)
     create_table_sql = SQLField(null=True, editable=False)
     geoserver_setting = models.TextField(blank=True,null=True,editable=False)
     pending_actions = models.IntegerField(blank=True,null=True,editable=False)
@@ -2021,7 +2031,7 @@ class Publish(Transform,ResourceStatusManagement,SignalEnable):
         return PublishAction(self.pending_actions)
 
     def builtin_style_file(self,style_format="sld"):
-        if SpatialTable.check_normal(self.spatial_type):
+        if self.is_normal:
             #is a normal table, no style file
             return None
         elif self.input_table and self.input_table.spatial_type == self.spatial_type  and self.input_table.style_file(style_format):
@@ -2108,9 +2118,9 @@ class Publish(Transform,ResourceStatusManagement,SignalEnable):
         """
         #import ipdb; ipdb.set_trace()
         #drop auto generated spatial index
-        #SpatialTable.get_instance(cursor,publish_schema,self.table_name,True).drop_indexes(cursor)
+        #SpatialTable.get_instance(publish_schema,self.table_name,True).drop_indexes()
         #drop all indexes except primary key
-        #DbUtil.drop_all_indexes(publish_schema,self.table_name,False)
+        #defaultDbUtil.drop_all_indexes(self.table_name,publish_schema,False)
 
         sql = "CREATE OR REPLACE VIEW \"{3}\".\"{0}\" AS SELECT *, md5(CAST(row.* AS text)) as md5_rowhash FROM \"{2}\".\"{1}\"() as row;".format(self.table_name,self.func_name,trans_schema,publish_view_schema)
         cursor.execute(sql)
@@ -2136,7 +2146,7 @@ class Publish(Transform,ResourceStatusManagement,SignalEnable):
             cursor.execute(sql)
 
         #create index
-        SpatialTable.get_instance(cursor,publish_schema,self.table_name,True).create_indexes(cursor)
+        SpatialTable.get_instance(publish_schema,self.table_name,True).create_indexes()
 
 
     def _create(self, cursor,schema,input_schema=None,normal_schema=None):
@@ -2199,10 +2209,10 @@ class Publish(Transform,ResourceStatusManagement,SignalEnable):
             #invoke the normalise function to check whether it is correct or not.
             self.invoke(cursor,schema,normal_schema,self.workspace.test_view_schema,self.workspace.test_schema)
 
-            self.create_table_sql = DbUtil.get_create_table_sql(self.workspace.test_schema,self.table_name)
+            self.create_table_sql = defaultDbUtil.get_create_table_sql(self.table_name,self.workspace.test_schema)
 
             #check the table is spatial or non spatial
-            self.spatial_type = SpatialTable.get_instance(cursor,self.workspace.test_schema,self.table_name,True).spatial_type
+            self.spatial_type = SpatialTable.get_instance(self.workspace.test_schema,self.table_name,True).spatial_type
 
             if self.pk and hasattr(self,"changed_fields")  and "status" in self.changed_fields:
                 #publish status changed.
@@ -2230,7 +2240,8 @@ class Publish(Transform,ResourceStatusManagement,SignalEnable):
         """
         #remove it from catalogue service
         res = requests.delete("{}/catalogue/api/records/{}:{}/".format(settings.CSW_URL,self.workspace.name,self.table_name),auth=(settings.CSW_USER,settings.CSW_PASSWORD))
-        res.raise_for_status()
+        if res.status_code != 404:
+            res.raise_for_status()
 
         #get all possible files
         files =[self.output_filename_abs(action) for action in ['publish','meta','empty_gwc'] ]
@@ -2293,7 +2304,7 @@ class Publish(Transform,ResourceStatusManagement,SignalEnable):
                 style_file_folder = os.path.join(BorgConfiguration.STYLE_FILE_DUMP_DIR,self.workspace.publish_channel.name, self.workspace.name)
             else:
                 style_file_folder = os.path.join(BorgConfiguration.STYLE_FILE_DUMP_DIR,self.workspace.publish_channel.name)
-            meta_data = self.update_catalogue_service(style_dump_dir=style_file_folder,md5=True)
+            meta_data = self.update_catalogue_service(style_dump_dir=style_file_folder,md5=True,extra_datas={"publication_date":datetime.now().strftime("%Y-%m-%d %H:%M:%S.%f")})
 
             #write meta data file
             file_name = "{}.meta.json".format(self.table_name)
@@ -2417,9 +2428,9 @@ class Publish(Transform,ResourceStatusManagement,SignalEnable):
         meta_data = {}
         meta_data["workspace"] = self.workspace.name
         meta_data["name"] = self.table_name
-        if SpatialTable.check_normal(self.spatial_type) or not self.workspace.publish_channel.sync_geoserver_data:
-            meta_data["service_type"] = ""
-        elif SpatialTable.check_raster(self.spatial_type):
+        if self.is_normal:
+            meta_data["service_type"] = "WFS"
+        elif self.is_raster:
             meta_data["service_type"] = "WMS"
             meta_data["service_type_version"] = self.workspace.publish_channel.wms_version
         else:
@@ -2446,15 +2457,13 @@ class Publish(Transform,ResourceStatusManagement,SignalEnable):
         meta_data["modified"] = modify_time.astimezone(timezone.get_default_timezone()).strftime("%Y-%m-%d %H:%M:%S.%f")
 
         #bbox
-        if SpatialTable.check_spatial(self.spatial_type):
+        if self.is_spatial:
             cursor=connection.cursor()
-            st = SpatialTable.get_instance(cursor,self.workspace.schema,self.table_name,bbox=True,crs=True)
-            if st.geometry_columns:
-                meta_data["bounding_box"] = st.geometry_columns[0][2]
-                meta_data["crs"] = st.geometry_columns[0][3]
-            elif st.geography_columns:
-                meta_data["bounding_box"] = st.geography_columns[0][2]
-                meta_data["crs"] = st.geography_columns[0][3]
+            st = SpatialTable.get_instance(self.workspace.schema,self.table_name,bbox=True,crs=True)
+            if st.spatial_column:
+                meta_data["bounding_box"] = st.bbox
+                meta_data["crs"] = st.crs
+
         meta_data["styles"] = []
         for style_format in ["sld","qml","lyr"]:
             f = self.builtin_style_file(style_format)
@@ -2469,7 +2478,7 @@ class Publish(Transform,ResourceStatusManagement,SignalEnable):
             meta_data["ows_resource"]["wfs_version"] = self.workspace.publish_channel.wfs_version
             meta_data["ows_resource"]["wfs_endpoint"] = self.workspace.publish_channel.wfs_endpoint
 
-        if meta_data["service_type"] in ("WFS","WMS") and self.workspace.publish_channel.wfs_endpoint:
+        if meta_data["service_type"] in ("WFS","WMS") and self.workspace.publish_channel.wfs_endpoint and self.is_spatial:
             meta_data["ows_resource"]["wms"] = True
             meta_data["ows_resource"]["wms_version"] = self.workspace.publish_channel.wms_version
             meta_data["ows_resource"]["wms_endpoint"] = self.workspace.publish_channel.wms_endpoint
@@ -2478,8 +2487,6 @@ class Publish(Transform,ResourceStatusManagement,SignalEnable):
             if geo_settings.get("create_cache_layer",False) and self.workspace.publish_channel.gwc_endpoint:
                 meta_data["ows_resource"]["gwc"] = True
                 meta_data["ows_resource"]["gwc_endpoint"] = self.workspace.publish_channel.gwc_endpoint
-
-
 
         return meta_data
 
@@ -2490,30 +2497,35 @@ class Publish(Transform,ResourceStatusManagement,SignalEnable):
         bbox = meta_data.get("bounding_box",None)
         crs = meta_data.get("crs",None)
         #update catalog service
-        res = requests.post("{}/catalogue/api/records/".format(settings.CSW_URL),json=meta_data,auth=(settings.CSW_USER,settings.CSW_PASSWORD))
-        res.raise_for_status()
-        meta_data = res.json()
-        #process styles
-        styles = meta_data.get("styles",[])
-        #filter out qml and lyr styles
-        sld_styles = [s for s in meta_data.get("styles",[]) if s["format"].lower() == "sld"]
-        meta_data["styles"] = sld_styles
-        if style_dump_dir:
-            meta_data["styles"] = {}
-
-        for style in sld_styles:
-            if style["default"]:
-                #default sld file
-                meta_data["default_style"] = style["name"]
+        if self.workspace.publish_channel.sync_geoserver_data:
+            res = requests.post("{}/catalogue/api/records/?style_content=true".format(settings.CSW_URL),json=meta_data,auth=(settings.CSW_USER,settings.CSW_PASSWORD))
+            if 400 <= res.status_code < 600 and res.content:
+                res.reason = "{}({})".format(res.reason,res.content)
+            res.raise_for_status()
+            meta_data = res.json()
+            #process styles
+            styles = meta_data.get("styles",[])
+            #filter out qml and lyr styles
+            sld_styles = [s for s in meta_data.get("styles",[]) if s["format"].lower() == "sld"]
+            meta_data["styles"] = sld_styles
             if style_dump_dir:
-                #write the style into file system
-                style_file = os.path.join(style_dump_dir,"{}.{}.sld".format(self.table_name,style["name"]))
-                with open(style_file,"wb") as f:
-                    f.write(style["raw_content"].decode("base64"))
-                if md5:
-                    meta_data["styles"][style["name"]] = {"file":"{}{}".format(BorgConfiguration.MASTER_PATH_PREFIX, style_file),"default":style["default"],"md5":file_md5(style_file)}
-                else:
-                    meta_data["styles"][style["name"]] = {"file":"{}{}".format(BorgConfiguration.MASTER_PATH_PREFIX, style_file),"default":style["default"]}
+                meta_data["styles"] = {}
+                if not os.path.exists(style_dump_dir):
+                    os.makedirs(style_dump_dir)
+
+            for style in sld_styles:
+                if style["default"]:
+                    #default sld file
+                    meta_data["default_style"] = style["name"]
+                if style_dump_dir:
+                    #write the style into file system
+                    style_file = os.path.join(style_dump_dir,"{}.{}.sld".format(self.table_name,style["name"]))
+                    with open(style_file,"wb") as f:
+                        f.write(style["raw_content"].decode("base64"))
+                    if md5:
+                        meta_data["styles"][style["name"]] = {"file":"{}{}".format(BorgConfiguration.MASTER_PATH_PREFIX, style_file),"default":style["default"],"md5":file_md5(style_file)}
+                    else:
+                        meta_data["styles"][style["name"]] = {"file":"{}{}".format(BorgConfiguration.MASTER_PATH_PREFIX, style_file),"default":style["default"]}
 
         #add extra data to meta data
         meta_data["workspace"] = self.workspace.name
@@ -2522,11 +2534,11 @@ class Publish(Transform,ResourceStatusManagement,SignalEnable):
         meta_data["data_schema"] = self.workspace.publish_data_schema
         meta_data["outdated_schema"] = self.workspace.publish_outdated_schema
         meta_data["channel"] = self.workspace.publish_channel.name
-        meta_data["spatial_data"] = SpatialTable.check_spatial(self.spatial_type)
-        meta_data["spatial_type"] = SpatialTable.get_spatial_type_desc(self.spatial_type)
+        meta_data["spatial_data"] = self.is_spatial
+        meta_data["spatial_type"] = self.spatial_type_desc
         meta_data["sync_postgres_data"] = self.workspace.publish_channel.sync_postgres_data
         meta_data["sync_geoserver_data"] = self.workspace.publish_channel.sync_geoserver_data
-        meta_data["preview_path"] = "{}{}".format(BorgConfiguration.MASTER_PATH_PREFIX, settings.PREVIEW_ROOT)
+        meta_data["preview_path"] = "{}{}".format(BorgConfiguration.MASTER_PATH_PREFIX, BorgConfiguration.PREVIEW_DIR)
         meta_data["auth_level"] = self.workspace.auth_level
 
         if self.geoserver_setting:
@@ -2535,7 +2547,7 @@ class Publish(Transform,ResourceStatusManagement,SignalEnable):
         #bbox
         if "bounding_box" in meta_data:
             del meta_data["bounding_box"]
-        if SpatialTable.check_spatial(self.spatial_type):
+        if self.is_spatial:
             meta_data["bbox"] = bbox
             meta_data["crs"] = crs
 
@@ -2595,6 +2607,7 @@ class Publish(Transform,ResourceStatusManagement,SignalEnable):
             super(Publish,self).delete(using)
 
     def save(self, force_insert=False, force_update=False, using=None, update_fields=None):
+        if not self.data_changed: return
         with transaction.atomic():
             super(Publish,self).save(force_insert,force_update,using,update_fields)
 
@@ -2633,7 +2646,7 @@ class PublishEventListener(object):
         if not instance.pk:
             instance.new_object = True
 
-        if not instance.save_signal_guard():
+        if not instance.editing_mode:
             return
 
         #save relationship first
@@ -2659,7 +2672,7 @@ class PublishEventListener(object):
     @receiver(post_save, sender=Publish)
     def _post_save(sender, instance, **args):
         #import ipdb;ipdb.set_trace()
-        if not instance.save_signal_enabled():
+        if not instance.editing_mode:
             return
 
         #delete the empty relations
@@ -2722,13 +2735,13 @@ class Publish_NormalTable(BorgModel):
         else:
             return self.publish.name if self.publish else ""
 
-class Style(BorgModel,ResourceStatusManagement):
+class Style(BorgModel,ResourceStatusMixin):
     name = models.SlugField(max_length=255, help_text="Name of Publish", validators=[validate_slug])
     description = models.CharField(max_length=512,blank=True,null=True)
     publish = models.ForeignKey(Publish,null=False,blank=False)
     status = models.CharField(max_length=32, choices=ResourceStatus.publish_status_options,default=ResourceStatus.Enabled.name)
     sld = XMLField(help_text="Styled Layer Descriptor", unique=False,blank=True,null=True)
-    last_modify_time = models.DateTimeField(auto_now=False,auto_now_add=True,editable=False,default=timezone.now,null=False)
+    last_modify_time = models.DateTimeField(auto_now=False,auto_now_add=True,editable=False,null=False)
 
     _style_name_re = re.compile("<se:Name>(?P<layer>.*?)</se:Name>")
     _property_re = re.compile("<ogc:PropertyName>(?P<property>.*?)</ogc:PropertyName>")
@@ -2807,6 +2820,11 @@ class Style(BorgModel,ResourceStatusManagement):
             f.write(self.sld)
 
         return style_file
+
+    def save(self, force_insert=False, force_update=False, using=None, update_fields=None):
+        if not self.data_changed: return
+        with transaction.atomic():
+            super(Style,self).save(force_insert,force_update,using,update_fields)
 
 
     def __str__(self):

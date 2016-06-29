@@ -8,8 +8,9 @@ from django.views.generic import View
 from django.contrib.auth.decorators import login_required
 from django.views.decorators.csrf import csrf_exempt
 from django.utils.decorators import method_decorator 
-from django.core.servers.basehttp import FileWrapper
 from django.http import HttpResponse
+
+from wsgiref.util import FileWrapper
 
 # Create your views here.
 

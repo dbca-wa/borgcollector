@@ -10,11 +10,13 @@ from django.http import HttpResponseRedirect
 from django.utils.safestring import mark_safe
 from django.utils import timezone
 
+from reversion.admin import VersionAdmin
+
 from tablemanager.models import (
     ForeignTable, Input, NormalTable,
     Normalise, Workspace, Publish, Replica,
     Normalise_NormalTable,
-    PublishChannel,DataSource
+    PublishChannel,DataSource,DatasourceType
 )
 from tablemanager.forms import (
     NormaliseForm,PublishForm,ForeignTableForm,
@@ -25,12 +27,11 @@ from harvest.models import Job
 from harvest.jobstates import JobState
 from borg.admin import site
 from harvest.jobstatemachine import JobStatemachine
-from borg_utils.jobintervals import Manually
+from borg_utils.jobintervals import JobInterval
 from borg_utils.spatial_table import SpatialTable
 from borg_utils.borg_config import BorgConfiguration
 from borg_utils.resource_status import ResourceStatus
 from borg_utils.hg_batch_push import try_set_push_owner, try_clear_push_owner, increase_committed_changes, try_push_to_repository
-from borg_utils.admin import BorgAdmin
 
 logger = logging.getLogger(__name__)
 
@@ -86,7 +87,7 @@ class JobFields(object):
     _job_message.allow_tags = True
     _job_message.short_description = "Job message"
 
-class PublishChannelAdmin(BorgAdmin):
+class PublishChannelAdmin(VersionAdmin):
     list_display = ("name", "sync_postgres_data","sync_geoserver_data","last_modify_time")
     readonly_fields = ("last_modify_time",)
     form = PublishChannelForm
@@ -142,10 +143,18 @@ class PublishChannelAdmin(BorgAdmin):
         return actions 
 
 
-class DataSourceAdmin(BorgAdmin):
+class DataSourceAdmin(VersionAdmin):
     list_display = ("name","type", "last_modify_time")
     search_fields = ["name"]
     form = DataSourceForm
+
+    def get_fields(self, request, obj=None):
+        if ((obj.type if obj else request.POST.get("type")) == DatasourceType.DATABASE) :
+            base_fields = ["name","type","description","user","password","sql","vrt"]
+        else:
+            base_fields = ["name","type","description","vrt"]
+
+        return base_fields + list(self.get_readonly_fields(request, obj))
 
     def custom_delete_selected(self,request,queryset):
         if request.POST.get('post') != 'yes':
@@ -198,7 +207,7 @@ class DataSourceAdmin(BorgAdmin):
         return actions 
 
 
-class WorkspaceAdmin(BorgAdmin):
+class WorkspaceAdmin(VersionAdmin):
     list_display = ("name","_publish_channel","auth_level","_schema","_test_schema",)
     readonly_fields = ("_schema","_view_schema","_test_schema","_test_view_schema")
     #actions = [instantiate]
@@ -322,7 +331,7 @@ class WorkspaceAdmin(BorgAdmin):
         actions['delete_selected'] = (WorkspaceAdmin.custom_delete_selected,self.default_delete_action[1],self.default_delete_action[2])
         return actions 
 
-class ForeignTableAdmin(BorgAdmin):
+class ForeignTableAdmin(VersionAdmin):
     list_display = ("name","_server","last_modify_time")
     readonly_fields = ("last_modify_time",)
     #actions = [instantiate]
@@ -391,7 +400,7 @@ def _up_to_date(o):
 _up_to_date.short_description = "Up to date"
 _up_to_date.boolean = True
 
-class NormalTableAdmin(BorgAdmin):
+class NormalTableAdmin(VersionAdmin):
     list_display = ("name","_normalise","last_modify_time",_up_to_date)
     #actions = [instantiate]
     readonly_fields = ("_normalise","last_modify_time",_up_to_date)
@@ -457,12 +466,26 @@ class NormalTableAdmin(BorgAdmin):
         actions['delete_selected'] = (NormalTableAdmin.custom_delete_selected,self.default_delete_action[1],self.default_delete_action[2])
         return actions 
 
-class InputAdmin(BorgAdmin,JobFields):
+class InputAdmin(VersionAdmin,JobFields):
     list_display = ("name","_data_source", "geometry", "extent", "count","last_modify_time",_up_to_date,"_job_id", "_job_batch_id", "_job_status")
     readonly_fields = ("spatial_type_desc","_style_file","title","abstract","_create_table_sql","ds_modify_time","last_modify_time",_up_to_date,"_job_batch_id","_job_id","_job_status","_job_message")
     search_fields = ["name","data_source__name"]
 
     form = InputForm
+
+    def get_fields(self, request, obj=None):
+        if (obj and hasattr(obj,"data_source")) or "data_source" in request.POST:
+            if (obj.data_source.type if obj else request.POST.get("data_source")) == DatasourceType.DATABASE:
+                if hasattr(obj,"foreign_table") if obj else "foreign_table" in request.POST:
+                    base_fields = ["name","data_source","foreign_table","generate_rowid","source"]
+                else:
+                    base_fields = ["name","data_source","foreign_table"]
+            else:
+                base_fields = ["name","data_source","generate_rowid","source"]
+        else:
+            base_fields = ["name","data_source"]
+
+        return base_fields + list(self.get_readonly_fields(request, obj))
 
     def _data_source(self,o):
         return "<a href='/tablemanager/datasource/{0}/'>{1}</a>".format(o.data_source.pk,o.data_source)
@@ -540,7 +563,7 @@ class InputAdmin(BorgAdmin,JobFields):
         actions['delete_selected'] = (InputAdmin.custom_delete_selected,self.default_delete_action[1],self.default_delete_action[2])
         return actions 
 
-class NormaliseAdmin(BorgAdmin,JobFields):
+class NormaliseAdmin(VersionAdmin,JobFields):
     list_display = ("name","_output_table","last_modify_time",_up_to_date,"_job_id", "_job_batch_id","_job_status")
     readonly_fields = ("last_modify_time",_up_to_date,"_job_batch_id","_job_id","_job_status","_job_message")
     search_fields = ["__name"]
@@ -603,7 +626,7 @@ class NormaliseAdmin(BorgAdmin,JobFields):
         actions['delete_selected'] = (NormaliseAdmin.custom_delete_selected,self.default_delete_action[1],self.default_delete_action[2])
         return actions 
 
-class PublishAdmin(BorgAdmin,JobFields):
+class PublishAdmin(VersionAdmin,JobFields):
     list_display = ("name","_workspace","spatial_type_desc","interval","_enabled","_publish_content","_job_id", "_job_batch_id", "_job_status","waiting","running","completed","failed")
     readonly_fields = ("_create_table_sql","spatial_type_desc","last_modify_time","_publish_content","_job_batch_id","_job_id","_job_status","_job_message","waiting","running","completed","failed")
     search_fields = ["name","status","workspace__name"]
@@ -611,6 +634,13 @@ class PublishAdmin(BorgAdmin,JobFields):
     form = PublishForm
 
     _geoserver_setting_fields = [f[0] for f in PublishForm.base_fields.items() if hasattr(f[1],"setting_type") and f[1].setting_type == "geoserver_setting"]
+
+    def get_fields(self, request, obj=None):
+        if obj and SpatialTable.check_normal(obj.spatial_type):
+            base_fields = ['name','workspace','interval','status','input_table','dependents','priority','sql','create_extra_index_sql']
+        else:
+            base_fields = ['name','workspace','interval','status','input_table','dependents','priority','kmi_title','kmi_abstract','sql','create_extra_index_sql',"create_cache_layer","server_cache_expire","client_cache_expire"]
+        return base_fields + list(self.get_readonly_fields(request, obj))
 
     def _workspace(self,o):
         return "<a href='/tablemanager/workspace/{0}/'>{1}</a>".format(o.workspace.pk,o.workspace)
@@ -794,11 +824,11 @@ class PublishAdmin(BorgAdmin,JobFields):
     disable_publish.short_description = "Disable selected publishs"
 
     def create_harvest_job(self,request,queryset):
-        job_batch_id = Manually.instance().job_batch_id()
+        job_batch_id = JobInterval.Manually.job_batch_id()
         result = None
         failed_objects = []
         for publish in queryset:
-            result = JobStatemachine.create_job(publish.id,Manually.instance(),job_batch_id)
+            result = JobStatemachine.create_job(publish.id,JobInterval.Manually,job_batch_id)
             if not result[0]:
                 failed_objects.append(("{0}:{1}".format(publish.workspace.name,publish.name),result[1]))
 

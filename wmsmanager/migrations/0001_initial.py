@@ -4,7 +4,6 @@ from __future__ import unicode_literals
 from django.db import models, migrations
 import django.utils.timezone
 import borg_utils.resource_status
-import borg_utils.signal_enable
 
 
 class Migration(migrations.Migration):
@@ -36,7 +35,7 @@ class Migration(migrations.Migration):
             options={
                 'ordering': ('server', 'name'),
             },
-            bases=(models.Model, borg_utils.resource_status.ResourceStatusManagement, borg_utils.signal_enable.SignalEnable),
+            bases=(models.Model, borg_utils.resource_status.ResourceStatusMixin),
         ),
         migrations.CreateModel(
             name='WmsServer',
@@ -56,7 +55,7 @@ class Migration(migrations.Migration):
             ],
             options={
             },
-            bases=(models.Model, borg_utils.resource_status.ResourceStatusManagement, borg_utils.signal_enable.SignalEnable),
+            bases=(models.Model, borg_utils.resource_status.ResourceStatusMixin),
         ),
         migrations.AddField(
             model_name='wmslayer',

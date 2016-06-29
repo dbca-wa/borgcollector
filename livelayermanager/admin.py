@@ -8,28 +8,28 @@ from django.contrib import messages
 from django.utils.safestring import mark_safe
 from django.db import transaction
 
-from wmsmanager.models import WmsServer, WmsLayer, PublishedWmsLayer, InterestedWmsLayer
-from wmsmanager.forms import WmsServerForm,WmsLayerForm
-from layergroup.models import LayerGroupLayers
+from livelayermanager.models import Datasource, Layer, PublishedLayer
+from livelayermanager.forms import DatasourceForm,LayerForm
 from borg.admin import site
 from borg_utils.resource_status import ResourceStatus,ResourceAction
 from borg_utils.hg_batch_push import try_set_push_owner, try_clear_push_owner, increase_committed_changes, try_push_to_repository
+from borg_utils.spatial_table import SpatialTable
 
 logger = logging.getLogger(__name__)
 
-class WmsServerAdmin(admin.ModelAdmin):
-    list_display = ("name","capability_url","_layers", "status","last_publish_time","last_unpublish_time", "last_modify_time", "last_refresh_time")
+class DatasourceAdmin(admin.ModelAdmin):
+    list_display = ("name","workspace","host","db_name","schema","_layers", "status","last_publish_time", "last_modify_time", "last_refresh_time")
     readonly_fields = ("_layers","status","last_publish_time", "last_modify_time","last_unpublish_time","last_refresh_time")
     search_fields = ["name","status"]
 
-    actions = ['publish','unpublish','refresh_layers']
+    actions = ['publish','unpublish','refresh']
     ordering = ("name",)
 
-    form = WmsServerForm
+    form = DatasourceForm
 
     def _layers(self,o):
         if o.layers > 0:
-            return "<a href='/wmsmanager/wmslayer/?q={0}'>{1}</a>".format(o.name,o.layers)
+            return "<a href='/livelayermanager/layer/?q=&datasource__id__exact={0}'>{1}</a>".format(o.pk,o.layers)
         elif o.last_refresh_time:
             return "0"
         else:
@@ -38,78 +38,74 @@ class WmsServerAdmin(admin.ModelAdmin):
     _layers.short_description = "Layers"
     _layers.admin_order_field = "layers"
 
-    def refresh_layers(self,request,queryset):
+    def refresh(self,request,queryset):
         result = None
-        failed_servers = []
-        for server in queryset:
+        failed_datasources = []
+        for datasource in queryset:
             #modify the table data
             try:
-                server.refresh_layers()
-                server.save()
-                
+                datasource.refresh()
             except:
                 error = sys.exc_info()
-                #failed_servers.append((server.name,traceback.format_exception_only(error[0],error[1])))
-                failed_servers.append((server.name,traceback.format_exc()))
-                #update table failed, continue to process the next server
+                failed_datasources.append((datasource.name,traceback.format_exc()))
                 continue
 
-        if failed_servers:
-            messages.warning(request, mark_safe("Refresh failed for some selected servers:<ul>{0}</ul>".format("".join(["<li>{0} : {1}</li>".format(o[0],o[1]) for o in failed_servers]))))
+        if failed_datasources:
+            messages.warning(request, mark_safe("Refresh failed for some selected datasources:<ul>{0}</ul>".format("".join(["<li>{0} : {1}</li>".format(o[0],o[1]) for o in failed_datasources]))))
         else:
-            messages.success(request, "Refresh successfully for all selected servers")
+            messages.success(request, "Refresh successfully for all selected datasources")
 
-    refresh_layers.short_description = "Refresh WMS Layers"
+    refresh.short_description = "Refresh"
     
     def publish(self,request,queryset):
         self._change_status(request,queryset,ResourceAction.PUBLISH,["status","last_publish_time"])
-    publish.short_description = "Publish selected servers"
+    publish.short_description = "Publish selected datasources"
 
     def unpublish(self,request,queryset):
         self._change_status(request,queryset,ResourceAction.UNPUBLISH,["status","last_unpublish_time"])
-    unpublish.short_description = "Unpublish selected servers"
+    unpublish.short_description = "Unpublish selected datasources"
 
     def _change_status(self,request,queryset,action,update_fields=None):
         result = None
         failed_objects = []
-        try_set_push_owner("wmsserver_admin",enforce=True)
+        try_set_push_owner("datasource_admin",enforce=True)
         warning_message = None
         try:
-            for server in queryset:
+            for datasource in queryset:
                 #import ipdb;ipdb.set_trace()
                 try:
-                    target_status = server.next_status(action)
-                    if target_status == server.status and not server.publish_required and not server.unpublish_required:
+                    target_status = datasource.next_status(action)
+                    if target_status == datasource.status and not datasource.publish_required and not datasource.unpublish_required:
                         #status not changed
                         continue
                     else:
-                        server.status = target_status
-                        server.save(update_fields=update_fields)
+                        datasource.status = target_status
+                        datasource.save(update_fields=update_fields)
                 except:
                     logger.error(traceback.format_exc())
                     error = sys.exc_info()
-                    failed_objects.append(("{0}:{1}".format(server.workspace.name,server.name),traceback.format_exception_only(error[0],error[1])))
+                    failed_objects.append(("{0}:{1}".format(datasource.workspace.name,datasource.name),traceback.format_exception_only(error[0],error[1])))
                     #remove failed, continue to process the next publish
                     continue
             try:
-                try_push_to_repository('wmsserver_admin',enforce=True)
+                try_push_to_repository('datasource_admin',enforce=True)
             except:
                 error = sys.exc_info()
                 warning_message = traceback.format_exception_only(error[0],error[1])
                 logger.error(traceback.format_exc())
         finally:
-            try_clear_push_owner("wmsserver_admin",enforce=True)
+            try_clear_push_owner("datasource_admin",enforce=True)
 
         if failed_objects or warning_message:
             if failed_objects:
                 if warning_message:
-                    messages.warning(request, mark_safe("<ul><li>{0}</li><li>Some selected servers are processed failed:<ul>{1}</ul></li></ul>".format(warning_message,"".join(["<li>{0} : {1}</li>".format(o[0],o[1]) for o in failed_objects]))))
+                    messages.warning(request, mark_safe("<ul><li>{0}</li><li>Some selected datasources are processed failed:<ul>{1}</ul></li></ul>".format(warning_message,"".join(["<li>{0} : {1}</li>".format(o[0],o[1]) for o in failed_objects]))))
                 else:
-                    messages.warning(request, mark_safe("Some selected servers are processed failed:<ul>{0}</ul>".format("".join(["<li>{0} : {1}</li>".format(o[0],o[1]) for o in failed_objects]))))
+                    messages.warning(request, mark_safe("Some selected datasources are processed failed:<ul>{0}</ul>".format("".join(["<li>{0} : {1}</li>".format(o[0],o[1]) for o in failed_objects]))))
             else:
                 messages.warning(request, mark_safe(warning_message))
         else:
-            messages.success(request, "All selected servers are processed successfully.")
+            messages.success(request, "All selected datasources are processed successfully.")
 
     def custom_delete_selected(self,request,queryset):
         if request.POST.get('post') != 'yes':
@@ -118,55 +114,55 @@ class WmsServerAdmin(admin.ModelAdmin):
     
         result = None
         failed_objects = []
-        try_set_push_owner("wmsserver_admin",enforce=True)
+        try_set_push_owner("datasource_admin",enforce=True)
         warning_message = None
         try:
-            for server in queryset:
+            for datasource in queryset:
                 #import ipdb;ipdb.set_trace()
                 try:
-                    #delete the server
-                    server.delete()
+                    #delete the datasource
+                    datasource.delete()
                 except:
                     logger.error(traceback.format_exc())
                     error = sys.exc_info()
-                    failed_objects.append(("{0}:{1}".format(server.workspace.name,server.name),traceback.format_exception_only(error[0],error[1])))
+                    failed_objects.append(("{0}:{1}".format(datasource.workspace.name,datasource.name),traceback.format_exception_only(error[0],error[1])))
                     #remove failed, continue to process the next publish
                     continue
             try:
-                try_push_to_repository('wmsserver_admin',enforce=True)
+                try_push_to_repository('datasource_admin',enforce=True)
             except:
                 error = sys.exc_info()
                 warning_message = traceback.format_exception_only(error[0],error[1])
                 logger.error(traceback.format_exc())
         finally:
-            try_clear_push_owner("wmsserver_admin",enforce=True)
+            try_clear_push_owner("datasource_admin",enforce=True)
 
         if failed_objects or warning_message:
             if failed_objects:
                 if warning_message:
-                    messages.warning(request, mark_safe("<ul><li>{0}</li><li>Some selected servers are deleted failed:<ul>{1}</ul></li></ul>".format(warning_message,"".join(["<li>{0} : {1}</li>".format(o[0],o[1]) for o in failed_objects]))))
+                    messages.warning(request, mark_safe("<ul><li>{0}</li><li>Some selected datasources are deleted failed:<ul>{1}</ul></li></ul>".format(warning_message,"".join(["<li>{0} : {1}</li>".format(o[0],o[1]) for o in failed_objects]))))
                 else:
-                    messages.warning(request, mark_safe("Some selected servers are deleted failed:<ul>{0}</ul>".format("".join(["<li>{0} : {1}</li>".format(o[0],o[1]) for o in failed_objects]))))
+                    messages.warning(request, mark_safe("Some selected datasources are deleted failed:<ul>{0}</ul>".format("".join(["<li>{0} : {1}</li>".format(o[0],o[1]) for o in failed_objects]))))
             else:
                 messages.warning(request, mark_safe(warning_message))
         else:
-            messages.success(request, "All selected servers are deleted successfully.")
+            messages.success(request, "All selected datasources are deleted successfully.")
 
     def get_actions(self, request):
-        actions = super(WmsServerAdmin, self).get_actions(request)
+        actions = super(DatasourceAdmin, self).get_actions(request)
         self.default_delete_action = actions['delete_selected']
         del actions['delete_selected']
-        actions['delete_selected'] = (WmsServerAdmin.custom_delete_selected,self.default_delete_action[1],self.default_delete_action[2])
+        actions['delete_selected'] = (DatasourceAdmin.custom_delete_selected,self.default_delete_action[1],self.default_delete_action[2])
         return actions 
 
-class AbstractWmsLayerAdmin(admin.ModelAdmin):
-    list_display = ("name","kmi_name","_workspace","_server","title","crs", "status","last_publish_time","last_unpublish_time","last_modify_time")
-    readonly_fields = ("_workspace","_server","path","title","abstract","crs","_bounding_box", "status","applications","last_publish_time","last_unpublish_time", "last_refresh_time","last_modify_time")
-    search_fields = ["name", "title"]
-    ordering = ("server","name",)
-    list_filter = ("server",)
+class AbstractLayerAdmin(admin.ModelAdmin):
+    list_display = ("table","name","_workspace","_datasource","spatial_type_desc","title","crs", "status","last_publish_time","last_refresh_time")
+    readonly_fields = ("_workspace","_datasource","spatial_type_desc","crs","_bounding_box", "status","_sql","last_publish_time","last_unpublish_time", "last_refresh_time","last_modify_time")
+    search_fields = ["table", "name"]
+    ordering = ("datasource","name","table")
+    list_filter = ("datasource",)
 
-    form = WmsLayerForm
+    form = LayerForm
 
     html = "<table > \
 <tr > \
@@ -196,19 +192,33 @@ class AbstractWmsLayerAdmin(admin.ModelAdmin):
     _bounding_box.allow_tags = True
     _bounding_box.short_description = "Bounding Box"
 
-    def _server(self,o):
-        if o.server:
-            return "<a href='/wmsmanager/wmsserver/{0}/'>{1}</a>".format(o.server.pk,o.server.name)
+    def _sql(self,o):
+        if o.sql:
+            return "<p style='white-space:pre'>" + o.sql + "</p>"
+        else:
+            return ''
+
+    _sql.allow_tags = True
+    _sql.short_description = "CREATE info for table"
+
+    def spatial_type_desc(self,o):
+        return SpatialTable.get_spatial_type_desc(o.spatial_type)
+    spatial_type_desc.short_description = "Spatial Type"
+    spatial_type_desc.admin_order_field = "spatial_type"
+
+    def _datasource(self,o):
+        if o.datasource:
+            return "<a href='/livelayermanager/datasource/{0}/'>{1}</a>".format(o.datasource.pk,o.datasource.name)
         else:
             return ""
-    _server.allow_tags = True
-    _server.short_description = "WMS Server"
-    _server.admin_order_field = "server"
+    _datasource.allow_tags = True
+    _datasource.short_description = "Datasource"
+    _datasource.admin_order_field = "datasource"
 
     def _workspace(self,o):
-        return o.server.workspace
+        return o.datasource.workspace
     _workspace.short_description = "Workspace"
-    _workspace.admin_order_field = "server__workspace"
+    _workspace.admin_order_field = "datasource__workspace"
 
     def has_add_permission(self,request):
         return False
@@ -216,40 +226,53 @@ class AbstractWmsLayerAdmin(admin.ModelAdmin):
     def has_delete_permission(self,request,obj=None):
         return False
 
+    def refresh(self,request,queryset):
+        result = None
+        failed_layers = []
+        for layer in queryset:
+            #modify the table data
+            try:
+                layer.refresh()
+            except:
+                error = sys.exc_info()
+                failed_layers.append((layer,traceback.format_exc()))
+                continue
+
+        if failed_layers:
+            messages.warning(request, mark_safe("Refresh failed for some selected layers:<ul>{0}</ul>".format("".join(["<li>{0} : {1}</li>".format(o[0],o[1]) for o in failed_layers]))))
+        else:
+            messages.success(request, "Refresh successfully for all selected layers")
+
+    refresh.short_description = "Refresh"
+    
     def empty_gwc(self,request,queryset):
         result = None
         failed_objects = []
-        try_set_push_owner("wmslayer_admin",enforce=True)
+        try_set_push_owner("livelayer_admin",enforce=True)
         warning_message = None
         try:
             for l in queryset:
                 try:
                     if l.publish_status.unpublished:
                         #Not published before.
-                        failed_objects.append(("{0}:{1}".format(l.server,l.name),"Not published before, no need to empty gwc."))
+                        failed_objects.append(("{0}:{1}".format(l.datasource,l.kmi_name),"Not published before, no need to empty gwc."))
                         continue
 
                     l.empty_gwc()
-                    #empty the related layergroup's cache
-                    for layer in LayerGroupLayers.objects.filter(layer = l):
-                        target_status = layer.group.next_status(ResourceAction.CASCADE_PUBLISH)
-                        if layer.group.publish_required:
-                            layer.group.empty_gwc()
-                    
                 except:
                     logger.error(traceback.format_exc())
                     error = sys.exc_info()
-                    failed_objects.append(("{0}:{1}".format(l.server,l.name),traceback.format_exception_only(error[0],error[1])))
+                    failed_objects.append(("{0}:{1}".format(l.datasource,l.kmi_name),traceback.format_exception_only(error[0],error[1])))
                     #remove failed, continue to process the next publish
                     continue
             try:
-                try_push_to_repository('wmslayer_admin',enforce=True)
+                try_push_to_repository('livelayer_admin',enforce=True)
             except:
                 error = sys.exc_info()
                 warning_message = traceback.format_exception_only(error[0],error[1])
                 logger.error(traceback.format_exc())
         finally:
-            try_clear_push_owner("wmslayer_admin",enforce=True)
+            try_clear_push_owner("livelayer_admin",enforce=True)
 
         if failed_objects or warning_message:
             if failed_objects:
@@ -275,7 +298,7 @@ class AbstractWmsLayerAdmin(admin.ModelAdmin):
     def _change_status(self,request,queryset,action,update_fields=None):
         result = None
         failed_objects = []
-        try_set_push_owner("wmslayer_admin",enforce=True)
+        try_set_push_owner("livelayer_admin",enforce=True)
         warning_message = None
         try:
             for l in queryset:
@@ -290,17 +313,17 @@ class AbstractWmsLayerAdmin(admin.ModelAdmin):
                 except:
                     logger.error(traceback.format_exc())
                     error = sys.exc_info()
-                    failed_objects.append(("{0}:{1}".format(l.server,l.name),traceback.format_exception_only(error[0],error[1])))
+                    failed_objects.append(("{0}:{1}".format(l.datasource,l.kmi_name),traceback.format_exception_only(error[0],error[1])))
                     #remove failed, continue to process the next publish
                     continue
             try:
-                try_push_to_repository('wmslayer_admin',enforce=True)
+                try_push_to_repository('livelayer_admin',enforce=True)
             except:
                 error = sys.exc_info()
                 warning_message = traceback.format_exception_only(error[0],error[1])
                 logger.error(traceback.format_exc())
         finally:
-            try_clear_push_owner("wmslayer_admin",enforce=True)
+            try_clear_push_owner("livelayer_admin",enforce=True)
 
         if failed_objects or warning_message:
             if failed_objects:
@@ -313,27 +336,29 @@ class AbstractWmsLayerAdmin(admin.ModelAdmin):
         else:
             messages.success(request, "All selected layers are processed successfully.")
 
-    actions = ['publish','empty_gwc','unpublish']
+    def get_search_results(self,request,queryset,search_term):
+        try:
+            datasource = Datasource.objects.get(pk = search_term)
+            return self.model.objects.filter(datasource = datasource).order_by("name"),False
+        except:
+            return super(AbstractLayerAdmin,self).get_search_results(request,queryset,search_term)
+
+    actions = ['publish','empty_gwc','unpublish','refresh']
     def get_actions(self, request):
         #import ipdb;ipdb.set_trace()
-        actions = super(AbstractWmsLayerAdmin, self).get_actions(request)
+        actions = super(AbstractLayerAdmin, self).get_actions(request)
         del actions['delete_selected']
         return actions 
 
-class WmsLayerAdmin(AbstractWmsLayerAdmin):
+class LayerAdmin(AbstractLayerAdmin):
     pass
 
-class PublishedWmsLayerAdmin(AbstractWmsLayerAdmin):
+class PublishedLayerAdmin(AbstractLayerAdmin):
     def get_queryset(self,request):
-        qs = super(PublishedWmsLayerAdmin,self).get_queryset(request)
+        qs = super(PublishedLayerAdmin,self).get_queryset(request)
         return qs.filter(status__in = ResourceStatus.published_status)
 
-class InterestedWmsLayerAdmin(AbstractWmsLayerAdmin):
-    def get_queryset(self,request):
-        qs = super(InterestedWmsLayerAdmin,self).get_queryset(request)
-        return qs.exclude(status = ResourceStatus.New.name,last_modify_time = None)
 
-site.register(WmsServer, WmsServerAdmin)
-site.register(WmsLayer, WmsLayerAdmin)
-site.register(PublishedWmsLayer, PublishedWmsLayerAdmin)
-site.register(InterestedWmsLayer, InterestedWmsLayerAdmin)
+site.register(Datasource, DatasourceAdmin)
+site.register(Layer, LayerAdmin)
+site.register(PublishedLayer, PublishedLayerAdmin)

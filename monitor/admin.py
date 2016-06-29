@@ -34,7 +34,7 @@ class SlaveServerAdmin(admin.ModelAdmin):
 
 
 class PublishSyncStatusAdmin(admin.ModelAdmin):
-    readonly_fields = ("id","slave_server","_publish","spatial_type","sync_job_id","sync_job_batch_id","sync_time","_sync_message","deploied_job_id","deploied_job_batch_id","deploy_time","_deploy_message")
+    readonly_fields = ("id","slave_server","_publish","spatial_type","sync_job_id","sync_job_batch_id","sync_time","_sync_message","deploied_job_id","deploied_job_batch_id","deploy_time","_deploy_message","_preview_file")
     list_display = ("_status","id","slave_server","_publish","spatial_type","deploied_job_id","deploy_time","sync_job_id","sync_time","_preview_file")
     search_fields = ("slave_server__name","publish","deploied_job_id","sync_job_id")
     list_display_links = ("id",)
@@ -86,11 +86,20 @@ class PublishSyncStatusAdmin(admin.ModelAdmin):
 
 
 class TaskSyncStatusAdmin(admin.ModelAdmin):
-    list_display = ("id","slave_server","task_type","_task_name","action","sync_succeed","sync_time")
-    readonly_fields = ("id","slave_server","task_type","_task_name","action","sync_succeed","sync_time","_sync_message")
+    list_display = ("id","slave_server","task_type","_task_name","action","sync_succeed","sync_time","_preview_file")
+    readonly_fields = ("id","slave_server","task_type","_task_name","action","sync_succeed","sync_time","_sync_message","_preview_file")
     search_fields = ("slave_server__name","task_type","task_name")
     list_filter = ("slave_server",)
 
+
+    def _preview_file(self,o):
+        if o.preview_file:
+            return "<img src='{0}'>".format(o.preview_file.url)
+        else:
+            return ''
+
+    _preview_file.allow_tags = True
+    _preview_file.short_description = "Preview"
 
     def _task_name(self,o):
         if o.task_name:

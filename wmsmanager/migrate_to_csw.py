@@ -9,7 +9,6 @@ from django.utils import timezone
 from django.conf import settings
 
 from wmsmanager.models import WmsLayer
-from borg_utils.resource_status import ResourceStatus,ResourceStatusManagement
 
 migrate_info = {}
 def migrate_all(debug=False):
@@ -54,7 +53,12 @@ def migrate(layer,debug=False):
 
     #update catalogue service
     res = requests.post("{}/catalogue/api/records/".format(settings.CSW_URL),json=meta_data,auth=(settings.CSW_USER,settings.CSW_PASSWORD))
-    res.raise_for_status()
+    try:
+        res.raise_for_status()
+    except:
+        print "Failed.{}:{}".format(res.status_code,res.content)
+        return
+
     meta_data = res.json()
     with open("/tmp/{}.{}.json".format(layer.server.workspace.name,layer.kmi_name),"wb") as f:
         json.dump(meta_data, f, indent=4)

@@ -40,6 +40,10 @@ class JobInterval(Singleton):
 
             JobInterval._publish_intervals = [o for o in JobInterval._all_intervals if o not in [Minutely.instance()]]
             JobInterval._publish_options = tuple([(o.name,o.name) for o in JobInterval._publish_intervals if o not in [Realtime.instance(),Triggered.instance(),Minutely.instance()]])
+
+            for o in JobInterval._all_intervals:
+                setattr(JobInterval,type(o).__name__,o)
+
         
 
     @staticmethod

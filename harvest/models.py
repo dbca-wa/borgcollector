@@ -12,7 +12,7 @@ from borg_utils.borg_config import BorgConfiguration
 
 from tablemanager.models import Publish
 from harvest.jobstates import JobState
-from borg_utils.jobintervals import Manually
+from borg_utils.jobintervals import JobInterval
 
 class Process(models.Model):
     current_server=socket.getfqdn()
@@ -21,7 +21,7 @@ class Process(models.Model):
     name = models.CharField(max_length=32,null=False,editable=False)
     desc = models.CharField(max_length=256,null=False,editable=False)
     server = models.CharField(max_length=64,null=False,editable=False)
-    pid = models.IntegerField(max_length=64,null=False,editable=False)
+    pid = models.IntegerField(null=False,editable=False)
     status = models.CharField(max_length=32,null=False,editable=False)
     last_message = models.TextField(null=True,editable=False)
     last_starttime = models.DateTimeField(null=True, editable=False)
@@ -69,7 +69,7 @@ class Process(models.Model):
 
 class Job(models.Model):
     batch_id = models.CharField(max_length=64,null=False,editable=False)
-    publish = models.ForeignKey(Publish,editable=False)
+    publish = models.ForeignKey(Publish,editable=False,null=True,on_delete=models.SET_NULL)
     state = models.CharField(max_length=64,null=False, editable=False)
     user_action = models.CharField(max_length=32,null=True,editable=False)
     retry_times = models.PositiveIntegerField(null=False,editable=False,default=0)
@@ -90,6 +90,12 @@ class Job(models.Model):
         return self.publish.normaltables
 
     @property
+    def jobstate(self):
+        if self.state:
+            return JobState.get_jobstate(self.state)
+        return None
+
+    @property
     def normalises(self):
         """
         the sorted related normalises 
@@ -106,7 +112,7 @@ class Job(models.Model):
 
     @property 
     def is_manually_created(self):
-        return self.job_type == Manually.instance().name
+        return self.job_type == JobInterval.Manually.name
 
     @property
     def inputs(self):

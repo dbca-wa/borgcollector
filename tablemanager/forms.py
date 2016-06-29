@@ -31,10 +31,6 @@ class ForeignTableForm(BorgModelForm):
             self.fields['server'].widget = self.fields['server'].widget.widget
             self.fields['server'].widget.attrs['readonly'] = True
 
-    def save(self, commit=True):
-        self.instance.enable_save_signal()
-        return super(ForeignTableForm, self).save(commit)
-
     class Meta:
         model = ForeignTable
         fields = "__all__"
@@ -66,23 +62,11 @@ class DataSourceForm(BorgModelForm):
         else:
             self.data['sql'] = ""
 
-    def save(self, commit=True):
-        self.instance.enable_save_signal()
-        return super(DataSourceForm, self).save(commit)
-
-    @classmethod
-    def get_fields(cls,obj=None):
-        if obj and obj.type == DatasourceType.DATABASE:
-            return ["name","type","description","user","password","sql","vrt"]
-        else:
-            return ["name","type","description","vrt"]
-
-
     class Meta:
         model = DataSource
         fields = "__all__"
         widgets = {
-                'type': BorgSelect(attrs={"onChange":"$('#datasource_form').append(\"<input type='hidden' name='_change_type' value=''>\");$('#datasource_form').submit()"}),
+                'type': BorgSelect(attrs={"onChange":"django.jQuery('#datasource_form').append(\"<input type='hidden' name='_change_type' value=''>\");django.jQuery('#datasource_form').submit()"}),
                 'description': forms.TextInput(attrs={"style":"width:95%"})
         }
 
@@ -117,18 +101,6 @@ class InputForm(BorgModelForm):
 
         return super(InputForm,self).get_mode(data)
 
-    def get_fields(self,obj=None):
-        if obj and hasattr(obj,"data_source"):
-            if obj.data_source.type == DatasourceType.DATABASE:
-                if hasattr(obj,"foreign_table"):
-                    return ["name","data_source","foreign_table","generate_rowid","source"]
-                else:
-                    return ["name","data_source","foreign_table"]
-            else:
-                return ["name","data_source","generate_rowid","source"]
-        else:
-            return ["name","data_source"]
-
     def insert_fields(self):
         self.data['source'] = self.instance.source
         self.fields['foreign_table'].queryset = ForeignTable.objects.filter(server=self.instance.data_source)
@@ -154,10 +126,6 @@ class InputForm(BorgModelForm):
         self.fields['foreign_table'].choice_name = "foreigntable_options_{}".format(self.instance.data_source.name)
         self.fields['foreign_table'].widget.choices = self.fields['foreign_table'].choices
 
-    def save(self, commit=True):
-        self.instance.enable_save_signal()
-        return super(InputForm, self).save(commit)
-
     class Meta:
         model = Input
         fields = "__all__"
@@ -174,10 +142,6 @@ class NormalTableForm(BorgModelForm):
         if 'instance' in kwargs and  kwargs['instance'] and kwargs['instance'].pk:
             self.fields['name'].widget.attrs['readonly'] = True
 
-    def save(self, commit=True):
-        self.instance.enable_save_signal()
-        return super(NormalTableForm, self).save(commit)
-
     class Meta:
         model = NormalTable
         fields = "__all__"
@@ -190,10 +154,6 @@ class PublishChannelForm(BorgModelForm):
         super(PublishChannelForm, self).__init__(*args, **kwargs)
         if 'instance' in kwargs and  kwargs['instance'] and kwargs['instance'].pk:
             self.fields['name'].widget.attrs['readonly'] = True
-
-    def save(self, commit=True):
-        self.instance.enable_save_signal()
-        return super(PublishChannelForm, self).save(commit)
 
     class Meta:
         model = PublishChannel
@@ -210,10 +170,6 @@ class WorkspaceForm(BorgModelForm):
 
             self.fields['publish_channel'].widget = self.fields['publish_channel'].widget.widget
             self.fields['publish_channel'].widget.attrs['readonly'] = True
-
-    def save(self, commit=True):
-        self.instance.enable_save_signal()
-        return super(WorkspaceForm, self).save(commit)
 
     class Meta:
         model = Workspace
@@ -277,9 +233,6 @@ class NormaliseForm(BorgModelForm):
                 pos += 1
                 normal_table_pos += 1
 
-    def save(self, commit=True):
-        self.instance.enable_save_signal()
-        return super(NormaliseForm, self).save(commit)
 
     class Meta:
         model = Normalise
@@ -321,12 +274,6 @@ class PublishForm(BorgModelForm,GeoserverSettingForm):
             self.fields['name'].widget.attrs['readonly'] = True
             self.fields['workspace'].widget.attrs['readonly'] = True
 
-    @classmethod
-    def get_fields(cls,obj=None):
-        if obj and SpatialTable.check_normal(obj.spatial_type):
-            return ('name','workspace','interval','status','input_table','dependents','priority','sql','create_extra_index_sql')
-        else:
-            return ('name','workspace','interval','status','input_table','dependents','priority','kmi_title','kmi_abstract','sql','create_extra_index_sql',"create_cache_layer","server_cache_expire","client_cache_expire")
 
     def _post_clean(self):
         super(PublishForm,self)._post_clean()
@@ -353,10 +300,6 @@ class PublishForm(BorgModelForm,GeoserverSettingForm):
     
         if self.instance and SpatialTable.check_spatial(self.instance.spatial_type):
             self.set_setting_to_model()
-
-    def save(self, commit=True):
-        self.instance.enable_save_signal()
-        return super(PublishForm, self).save(commit)
 
     class Meta:
         model = Publish

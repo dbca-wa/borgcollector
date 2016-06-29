@@ -56,7 +56,10 @@ class JobAdmin(admin.ModelAdmin):
     job_action.allow_tags = True
 
     def _publish(self,o):
-        return str(o.publish)
+        if o.publish:
+            return str(o.publish)
+        else:
+            return ""
     _publish.short_description = "Publish"
     _publish.admin_order_field = "publish__name"
 

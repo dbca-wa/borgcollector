@@ -260,7 +260,7 @@ class CascadeUnpublished(ResourceStatus):
         else:
             return (self,False)
 
-class ResourceStatusManagement(object):
+class ResourceStatusMixin(object):
     """
     Based on current status and expected status, return the target status;
     """
@@ -279,30 +279,24 @@ class ResourceStatusManagement(object):
     @property
     def publish_required(self):
         """
-        Can only be accessed right after calling next_status method
         Return True: publish the resource
                False: no action is required
         """
-        if not hasattr(threading.current_thread,"resource_id"):
+        if not hasattr(self,"_resource_action"):
             return False
-        elif getattr(threading.current_thread,"resource_id",None) != self.pk:
-            raise ValidationError("Resource object does not match.")
         else:
-            return getattr(threading.current_thread,"resource_action",None) == ResourceAction.PUBLISH
+            return getattr(self,"_resource_action",None) == ResourceAction.PUBLISH
 
     @property
     def unpublish_required(self):
         """
-        Can only be accessed right after calling next_status method
         Return True: unpublish the resource
                False: no action is required
         """
-        if not hasattr(threading.current_thread,"resource_id"):
+        if not hasattr(self,"_resource_action"):
             return False
-        elif getattr(threading.current_thread,"resource_id",None) != self.pk:
-            raise ValidationError("Resource object does not match.")
         else:
-            return getattr(threading.current_thread,"resource_action",None) == ResourceAction.UNPUBLISH
+            return getattr(self,"_resource_action",None) == ResourceAction.UNPUBLISH
 
     def next_status(self,action=None):
         """
@@ -312,8 +306,7 @@ class ResourceStatusManagement(object):
             s = self.publish_status.next_status(action)
         else:
             s = (self.publish_status,False)
-        setattr(threading.current_thread,"resource_id",self.pk)
-        setattr(threading.current_thread,"resource_action",(ResourceAction.PUBLISH if s[1] and s[0].published else (ResourceAction.UNPUBLISH if s[1] and s[0].unpublished else ResourceAction.NONE)))
+        setattr(self,"_resource_action",(ResourceAction.PUBLISH if s[1] and s[0].published else (ResourceAction.UNPUBLISH if s[1] and s[0].unpublished else ResourceAction.NONE)))
 
         return s[0].name
 

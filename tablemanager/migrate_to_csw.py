@@ -10,7 +10,7 @@ from django.conf import settings
 
 from tablemanager.models import Publish
 from harvest.models import Job
-from borg_utils.resource_status import ResourceStatus,ResourceStatusManagement
+from borg_utils.resource_status import ResourceStatus,ResourceStatusMixin
 
 migrate_info = {}
 def migrate_all(debug=False):
@@ -152,7 +152,12 @@ def migrate(p,debug=False):
 
     #update catalogue service
     res = requests.post("{}/catalogue/api/records/".format(settings.CSW_URL),json=meta_data,auth=(settings.CSW_USER,settings.CSW_PASSWORD))
-    res.raise_for_status()
+    try:
+        res.raise_for_status()
+    except:
+        print "Failed.{}:{}".format(res.status_code,res.content)
+        return
+
     meta_data = res.json()
     if debug:
         with open("/tmp/{}.{}.json".format(p.workspace.name,p.table_name),"wb") as f:

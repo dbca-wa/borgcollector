@@ -9,7 +9,7 @@ from django.utils import timezone
 from optparse import make_option
 from django.core.exceptions import ObjectDoesNotExist
 
-from borg_utils.jobintervals import JobInterval,Manually,Realtime,Triggered,Hourly,Daily,Minutely
+from borg_utils.jobintervals import JobInterval
 from harvest.jobstatemachine import JobStatemachine
 from harvest.models import Process
 from harvest.jobcleaner import HarvestJobCleaner
@@ -235,17 +235,17 @@ class Command(BaseCommand):
         #add all create jobs
         if options["create_job"]:
             for interval in JobInterval.publish_intervals():
-                if interval in [Manually.instance(), Realtime.instance(), Triggered.instance()]:
+                if interval in [JobInterval.Manually, JobInterval.Realtime, JobInterval.Triggered]:
                     continue
                 jobs.append(CreateJob(interval))
 
         #add run jobs;
         if options["run_job"]:
-            jobs.append(HarvestJob(Minutely.instance()))
+            jobs.append(HarvestJob(JobInterval.Minutely))
 
         #check datasource
         if options["check_ds"]:
-            jobs.append(CheckDsJob(Hourly.instance()))
+            jobs.append(CheckDsJob(JobInterval.Hourly))
 
         #clean outdated jobs
         if options["clean_job"] or options["clean_job_now"]:
@@ -273,7 +273,7 @@ class Command(BaseCommand):
                 HarvestJobCleaner(options["expire_days"],options["min_jobs"]).clean()
 
             if options["clean_job"]:
-                jobs.append(CleanJob(Daily.instance(),options))
+                jobs.append(CleanJob(JobInterval.Daily,options))
 
         if not jobs:
             #no repeated jobs to run
@@ -286,7 +286,7 @@ class Command(BaseCommand):
         while(True):
             min_next_run_time = None
             now = timezone.now()
-            RepeatedJob.job_batch_id = Daily.instance().job_batch_id(now)
+            RepeatedJob.job_batch_id = JobInterval.Daily.job_batch_id(now)
             for job in jobs:
                 next_run_time = job.run(now)
                 if min_next_run_time:
