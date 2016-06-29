@@ -75,6 +75,7 @@ class WmsServer(models.Model,ResourceStatusMixin,TransactionMixin):
     _newline_re = re.compile('\n+')
     def clean(self):
         self.capability_url = self.capability_url.strip()
+        self.user = (self.user.strip() if self.user else None) or None
         try:
             o = WmsServer.objects.get(pk=self.pk)
         except ObjectDoesNotExist:
@@ -110,7 +111,7 @@ class WmsServer(models.Model,ResourceStatusMixin,TransactionMixin):
         result = None
         #modify the table data
         now = timezone.now()
-        if self.user:
+        if self.user and self.user.strip():
             res = requests.get(self.get_capability_url, auth=(self.user,self.password), verify=False)
         else:
             res = requests.get(self.get_capability_url, verify=False)
@@ -334,6 +335,10 @@ class WmsServer(models.Model,ResourceStatusMixin,TransactionMixin):
 
     def __str__(self):
         return self.name               
+
+    class Meta:
+        ordering = ("name",)
+
 
 class WmsLayer(models.Model,ResourceStatusMixin,TransactionMixin):
     name = models.CharField(max_length=128,null=False,editable=True, help_text="The name of wms layer")
