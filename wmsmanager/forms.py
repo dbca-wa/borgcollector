@@ -41,10 +41,6 @@ class WmsServerForm(forms.ModelForm,GeoserverSettingForm):
         self.set_setting_to_model()
         super(WmsServerForm,self)._post_clean()
 
-    def save(self, commit=True):
-        self.instance.enable_save_signal()
-        return super(WmsServerForm, self).save(commit)
-
     class Meta:
         model = WmsServer
         fields = "__all__"
