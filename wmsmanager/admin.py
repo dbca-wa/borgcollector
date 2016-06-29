@@ -162,7 +162,7 @@ class WmsServerAdmin(admin.ModelAdmin):
 class AbstractWmsLayerAdmin(admin.ModelAdmin):
     list_display = ("name","kmi_name","_workspace","_server","title","crs", "status","last_publish_time","last_unpublish_time","last_modify_time")
     readonly_fields = ("_workspace","_server","path","title","abstract","crs","_bounding_box", "status","applications","last_publish_time","last_unpublish_time", "last_refresh_time","last_modify_time")
-    search_fields = ["name", "title"]
+    search_fields = ["name","kmi_name", "title"]
     ordering = ("server","name",)
     list_filter = ("server",)
 

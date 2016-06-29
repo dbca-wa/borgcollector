@@ -13,7 +13,7 @@ class BorgModel(django.db.models.Model):
         if hasattr(self,"changed_fields"):
             return getattr(self,"changed_fields")
         else:
-            return None
+            return True
 
     def full_clean(self, exclude=None, validate_unique=True, form_cleaned=True):
         """
