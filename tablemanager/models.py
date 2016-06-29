@@ -1973,14 +1973,11 @@ class Publish(Transform,ResourceStatusMixin,SpatialTableMixin):
     workspace = models.ForeignKey(Workspace)
     interval = models.CharField(max_length=64, choices=JobInterval.publish_options(), default=JobInterval.Weekly.name)
     status = models.CharField(max_length=32, choices=ResourceStatus.publish_status_options,default=ResourceStatus.Enabled.name)
-    kmi_title = models.CharField(max_length=512,null=True,editable=True,blank=True)
-    kmi_abstract = models.TextField(null=True,editable=True,blank=True)
     input_table = models.ForeignKey(Input, blank=True,null=True) # Referencing the schema which to introspect for the output of this transform
     sql = SQLField(default="$$".join(TRANSFORM).strip())
     spatial_type = models.IntegerField(default=1,editable=False)
     create_extra_index_sql = SQLField(null=True, editable=True,blank=True)
     priority = models.PositiveIntegerField(default=1000)
-    default_style = models.ForeignKey('Style',null=True,on_delete=models.SET_NULL,related_name="+",blank=True)
     create_table_sql = SQLField(null=True, editable=False)
     geoserver_setting = models.TextField(blank=True,null=True,editable=False)
     pending_actions = models.IntegerField(blank=True,null=True,editable=False)
@@ -2574,7 +2571,7 @@ class Publish(Transform,ResourceStatusMixin,SpatialTableMixin):
             elif up_to_date is None:
                 publish_action.possible_data_changed = True
 
-            if self.job_run_time < self.input_table.job_run_time:
+            if not self.job_run_time or self.job_run_time < self.input_table.job_run_time:
                 #input table is up to date but input table's last job run after normalise's last job run.
                 return publish_action.column_changed("input_table")
 
@@ -2735,113 +2732,4 @@ class Publish_NormalTable(BorgModel):
         else:
             return self.publish.name if self.publish else ""
 
-class Style(BorgModel,ResourceStatusMixin):
-    name = models.SlugField(max_length=255, help_text="Name of Publish", validators=[validate_slug])
-    description = models.CharField(max_length=512,blank=True,null=True)
-    publish = models.ForeignKey(Publish,null=False,blank=False)
-    status = models.CharField(max_length=32, choices=ResourceStatus.publish_status_options,default=ResourceStatus.Enabled.name)
-    sld = XMLField(help_text="Styled Layer Descriptor", unique=False,blank=True,null=True)
-    last_modify_time = models.DateTimeField(auto_now=False,auto_now_add=True,editable=False,null=False)
-
-    _style_name_re = re.compile("<se:Name>(?P<layer>.*?)</se:Name>")
-    _property_re = re.compile("<ogc:PropertyName>(?P<property>.*?)</ogc:PropertyName>")
-
-    def __init__(self,*args,**kwargs):
-        super(Style,self).__init__(*args,**kwargs)
-        if not self.pk and self.sld:
-            self.sld = self.format_style()
-
-
-    def clean(self):
-        self.name= None if not self.name else self.name.strip()
-        if not self.pk and self.name.lower() == "builtin":
-            raise ValidationError("'builtin' is a reserved name used by the style file accompanied with geo data.")
-
-        self.sld = None if not self.sld else self.sld.strip()
-        if self.publish_status == ResourceStatus.Enabled and not self.sld:
-            raise ValidationError("Sld can't be empty.")
-
-        if self.set_default_style and self.status == ResourceStatus.Disabled:
-            raise ValidationError("Can't set disabled style as default style")
-
-        self.sld = self.format_style()
-
-        self.last_modify_time = timezone.now()
-
-    @property
-    def default_style(self):
-        if self.publish:
-            return self.publish.default_style == self
-        else:
-            return False
-
-    def format_style(self):
-        """
-        reset <se:Name> based on publish name.
-        """
-        try:
-            sld = minidom.parseString(self.sld).toprettyxml(indent="    ")
-            sld = [line for line in sld.splitlines() if line.strip()]
-        except:
-            raise ValidationError("Incorrect xml format.{}".format(traceback.format_exc()))
-        
-        sld = os.linesep.join(sld)
-    
-        if sld and self.publish:
-            #do some transformation.
-            sld = self._style_name_re.sub("<se:Name>{}</se:Name>".format(self.publish.table_name),sld,2)
-            sld = self._property_re.sub((lambda m: "<ogc:PropertyName>{}</ogc:PropertyName>".format(m.group(1).lower())), sld)
-
-        return sld
-
-    def dump_file(self,folder):
-        """
-        Return the dump file 
-        """
-        #prepare style file
-        style_file_name = "{}.sld".format(self.publish.table_name) if self.name == "builtin" else "{}.{}.sld".format(self.publish.table_name,self.name)
-
-        style_file = os.path.join(folder,style_file_name)
-
-        return style_file
-
-
-    def dump(self,folder):
-        """
-        dump the style to a file
-        Return the file name
-        """
-        style_file = self.dump_file(folder)
-        if not os.path.exists(folder):
-            #dump dir does not exist, create it
-            os.makedirs(style_file_folder)
-
-        with open(style_file,"wb") as f:
-            f.write(self.sld)
-
-        return style_file
-
-    def save(self, force_insert=False, force_update=False, using=None, update_fields=None):
-        if not self.data_changed: return
-        with transaction.atomic():
-            super(Style,self).save(force_insert,force_update,using,update_fields)
-
-
-    def __str__(self):
-        return "{}:{}".format(self.publish,self.name)
-
-    class Meta:
-        unique_together = (("publish","name"))
-        ordering = ("publish","name")
-
-class Replica(models.Model):
-    """
-    Represents a remote PostgreSQL server which will be seeded with data
-    from the Publish objects.
-    """
-    active = models.BooleanField(default=True)
-    namespace = models.BooleanField(default=True, help_text="Use schemas to namespace replicated tables, if not will use a prefix")
-    name = models.CharField(max_length=255, validators=[validate_slug])
-    includes = models.ManyToManyField(Publish, blank=True, help_text="Published tables to include, all if blank")
-    link = models.TextField(default="CREATE SERVER {{self.name}} FOREIGN DATA WRAPPER postgres_fdw OPTIONS (dbserver '//<hostname>/<sid>');")
 
