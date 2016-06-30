@@ -317,7 +317,7 @@ class PublishResource(DjangoResource,BasicHttpAuthMixin):
     @staticmethod
     def urls():
         return [
-            url(r'^/publishs/(?P<name>[a-zA-Z0-9_\-]+)/$',PublishResource.as_detail(),name='publish_status'),
+            url(r'^publishs/(?P<name>[a-zA-Z0-9_\-]+)/$',PublishResource.as_detail(),name='publish_status'),
         ]
      
 
@@ -336,7 +336,7 @@ class PublishResource(DjangoResource,BasicHttpAuthMixin):
             except Publish.DoesNotExist:
                 return {
                     "layer" :{
-                        "name":publish.name,
+                        "name":name,
                     },
                 }
             if publish.status != ResourceStatus.Enabled.name:
@@ -352,6 +352,7 @@ class PublishResource(DjangoResource,BasicHttpAuthMixin):
             publishing_job = None
             latest_published_job = None
             deploied_job = None
+            deploied_jobid = None
             deploytime = None
             deploymessage = None
             if publish.job_id :
