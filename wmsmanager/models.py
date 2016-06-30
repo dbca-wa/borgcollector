@@ -388,7 +388,7 @@ class WmsLayer(models.Model,ResourceStatusMixin,TransactionMixin):
         meta_data["service_type_version"] = self.server.workspace.publish_channel.wms_version
         meta_data["title"] = self.title
         meta_data["abstract"] = self.abstract
-        meta_data["modified"] = (self.last_modify_time or self.last_refresh_time).astimezone(timezone.get_default_timezone()).strftime("%Y-%m-%d %H:%M:%S.%f")
+        meta_data["modified"] = self.last_modify_time.astimezone(timezone.get_default_timezone()).strftime("%Y-%m-%d %H:%M:%S.%f") if self.last_modify_time else None
 
         #bbox
         meta_data["bounding_box"] = self.bbox or None
