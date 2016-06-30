@@ -45,11 +45,11 @@ def migrate(layer,debug=False):
         meta_data["auto_update"] = False
         migrate_info[layer.kmi_name] = migrate_info.get(layer.kmi_name,"") + "abstract "
 
-    modify_time = layer.last_modify_time or layer.last_refresh_time
+    modify_time = layer.last_modify_time
     publish_time = layer.last_publish_time
-    insert_time = modify_time if modify_time <= publish_time else publish_time
+    insert_time = modify_time if modify_time and modify_time <= publish_time else publish_time
     meta_data["insert_date"] = insert_time.astimezone(timezone.get_default_timezone()).strftime("%Y-%m-%d %H:%M:%S.%f")
-    meta_data["modified"] = modify_time.astimezone(timezone.get_default_timezone()).strftime("%Y-%m-%d %H:%M:%S.%f")
+    meta_data["modified"] = modify_time.astimezone(timezone.get_default_timezone()).strftime("%Y-%m-%d %H:%M:%S.%f") if modify_time else None
     meta_data["publication_date"] = publish_time.astimezone(timezone.get_default_timezone()).strftime("%Y-%m-%d %H:%M:%S.%f")
 
     #update catalogue service
@@ -64,3 +64,29 @@ def migrate(layer,debug=False):
     with open("/tmp/{}.{}.json".format(layer.server.workspace.name,layer.kmi_name),"wb") as f:
         json.dump(meta_data, f, indent=4)
 
+
+def update_all():
+    """
+    Migrate all meta data to csw
+    """
+    file_name = "/tmp/update_wms_in_csw.sql"
+    with open(file_name,"wb") as f:
+        for layer in WmsLayer.objects.filter(status__in=[ResourceStatus.Published.name,ResourceStatus.CascadePublished.name,ResourceStatus.Updated.name]):
+            update(layer,f)
+
+def update(layer,f):
+    """
+    Migrate one meta data to csw
+    """
+    print "Update {}".format(layer.kmi_name)
+    meta_data = {}
+    modify_time = layer.last_modify_time
+    publish_time = layer.last_publish_time
+    insert_time = publish_time
+    meta_data["insert_date"] = insert_time.astimezone(timezone.get_default_timezone()).strftime("%Y-%m-%d %H:%M:%S.%f")
+    meta_data["modified"] = modify_time.astimezone(timezone.get_default_timezone()).strftime("%Y-%m-%d %H:%M:%S.%f") if modify_time else None
+    meta_data["publication_date"] = publish_time.astimezone(timezone.get_default_timezone()).strftime("%Y-%m-%d %H:%M:%S.%f")
+
+    sql = "UPDATE catalogue_record SET {} WHERE identifier = '{}';\n".format(" , ".join(["{}={}".format(k,"'{}'".format(v) if v else 'null') for k,v in meta_data.iteritems()]),"{}:{}".format(layer.server.workspace.name,layer.kmi_name))
+
+    f.write(sql)

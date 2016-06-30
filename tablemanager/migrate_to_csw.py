@@ -84,10 +84,10 @@ def migrate(p,debug=False):
     else:
         #job not exist
         publish_time = timezone.now()
-    insert_time = modify_time if modify_time <= publish_time else publish_time
+    insert_time = modify_time if modify_time and modify_time <= publish_time else publish_time
 
     meta_data["insert_date"] = insert_time.astimezone(timezone.get_default_timezone()).strftime("%Y-%m-%d %H:%M:%S.%f")
-    meta_data["modified"] = modify_time.astimezone(timezone.get_default_timezone()).strftime("%Y-%m-%d %H:%M:%S.%f")
+    meta_data["modified"] = modify_time.astimezone(timezone.get_default_timezone()).strftime("%Y-%m-%d %H:%M:%S.%f") if modify_time else None
     meta_data["publication_date"] = publish_time.astimezone(timezone.get_default_timezone()).strftime("%Y-%m-%d %H:%M:%S.%f")
 
     #get builtin style
@@ -162,4 +162,68 @@ def migrate(p,debug=False):
     if debug:
         with open("/tmp/{}.{}.json".format(p.workspace.name,p.table_name),"wb") as f:
             json.dump(meta_data, f, indent=4)
+
+
+
+def update_all():
+    """
+    Migrate all meta data to csw
+    """
+    file_name = "/tmp/update_publish_in_csw.sql"
+    with open(file_name,"wb") as f:
+        for p in Publish.objects.all():
+            update(p,f)
+
+
+def update(p,f):
+    """
+    output sql statement to update some meta data in csw
+    """
+    if p.status != ResourceStatus.Enabled.name:
+        #not enabled
+        return
+    if not p.job_id: 
+        #not published
+        return
+    job = None
+    try:
+        job = Job.objects.get(pk=p.job_id)
+    except:
+        #job not exist
+        pass
+    print "Update {}".format(p.table_name)
+
+    modify_time = None
+    if p.input_table:
+        for ds in p.input_table.datasource:
+            if os.path.exists(ds):
+                input_modify_time = datetime.utcfromtimestamp(os.path.getmtime(ds)).replace(tzinfo=pytz.UTC)
+                if modify_time:
+                    if modify_time < input_modify_time:
+                        modify_time = input_modify_time
+                else:
+                    modify_time = input_modify_time
+            else:
+                modify_time = p.last_modify_time
+    else:
+        modify_time = p.last_modify_time
+
+    if job and job.finished:
+        #job exist
+        publish_time = job.finished
+    else:
+        #job not exist
+        publish_time = timezone.now()
+    insert_time = publish_time
+
+    meta_data = {}
+    meta_data["insert_date"] = insert_time.astimezone(timezone.get_default_timezone()).strftime("%Y-%m-%d %H:%M:%S.%f")
+    meta_data["modified"] = modify_time.astimezone(timezone.get_default_timezone()).strftime("%Y-%m-%d %H:%M:%S.%f") if modify_time else None
+    meta_data["publication_date"] = publish_time.astimezone(timezone.get_default_timezone()).strftime("%Y-%m-%d %H:%M:%S.%f")
+
+    sql = "UPDATE catalogue_record SET {} WHERE identifier = '{}';\n".format(" , ".join(["{}={}".format(k,"'{}'".format(v) if v else 'null') for k,v in meta_data.iteritems()]),"{}:{}".format(p.workspace.name,p.table_name))
+
+    f.write(sql)
+
+
 
