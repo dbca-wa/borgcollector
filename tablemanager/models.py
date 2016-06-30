@@ -2451,7 +2451,7 @@ class Publish(Transform,ResourceStatusMixin,SpatialTableMixin):
                     modify_time = self.last_modify_time
         else:
             modify_time = self.last_modify_time
-        meta_data["modified"] = modify_time.astimezone(timezone.get_default_timezone()).strftime("%Y-%m-%d %H:%M:%S.%f")
+        meta_data["modified"] = modify_time.astimezone(timezone.get_default_timezone()).strftime("%Y-%m-%d %H:%M:%S.%f") if modify_time else None
 
         #bbox
         if self.is_spatial:
