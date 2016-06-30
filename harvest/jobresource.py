@@ -72,7 +72,7 @@ class JobResource(DjangoResource,BasicHttpAuthMixin):
     @staticmethod
     def urls():
         return [
-            url(r'^$',JobResource.as_list(),name='create_job'),
+            url(r'^jobs/$',JobResource.as_list(),name='create_job'),
         ]
      
     @skip_prepare
@@ -103,7 +103,7 @@ class MetaResource(DjangoResource,BasicHttpAuthMixin):
     @staticmethod
     def urls():
         return[
-            url(r'^$',MetaResource.as_list(),name='publish_meta'),
+            url(r'^metajobs/$',MetaResource.as_list(),name='publish_meta'),
         ]
      
     @skip_prepare
@@ -184,7 +184,7 @@ class MudmapResource(DjangoResource,BasicHttpAuthMixin):
     @staticmethod
     def urls():
         return [
-            url(r'^(?P<application>[a-zA-Z0-9_\-]+)/(?P<name>[a-zA-Z0-9_\-]+)/(?P<user>[a-zA-Z0-9_\-\.]+@[a-zA-Z0-9\-]+(\.[a-zA-Z0-9\-]+)+)/$',MudmapResource.as_list(),name='publish_mudmap'),
+            url(r'^mudmap/(?P<application>[a-zA-Z0-9_\-]+)/(?P<name>[a-zA-Z0-9_\-]+)/(?P<user>[a-zA-Z0-9_\-\.]+@[a-zA-Z0-9\-]+(\.[a-zA-Z0-9\-]+)+)/$',MudmapResource.as_list(),name='publish_mudmap'),
         ]
      
     @skip_prepare
@@ -317,7 +317,7 @@ class PublishResource(DjangoResource,BasicHttpAuthMixin):
     @staticmethod
     def urls():
         return [
-            url(r'^(?P<name>[a-zA-Z0-9_\-]+)/$',PublishResource.as_detail(),name='publish_status'),
+            url(r'^/publishs/(?P<name>[a-zA-Z0-9_\-]+)/$',PublishResource.as_detail(),name='publish_status'),
         ]
      
 
