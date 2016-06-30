@@ -415,6 +415,8 @@ class WmsLayer(models.Model,ResourceStatusMixin,TransactionMixin):
         crs = meta_data.get("crs",None)
         #update catalog service
         res = requests.post("{}/catalogue/api/records/".format(settings.CSW_URL),json=meta_data,auth=(settings.CSW_USER,settings.CSW_PASSWORD))
+        if 400 <= res.status_code < 600 and res.content:
+            res.reason = "{}({})".format(res.reason,res.content)
         res.raise_for_status()
         meta_data = res.json()
 
