@@ -308,7 +308,7 @@ class Layer(BorgModel,ResourceStatusMixin,TransactionMixin):
             self.bbox = json.dumps(st.bbox)
             self.spatial_type = st.spatial_type
             sql = self.datasource.dbUtil.get_create_table_sql(self.table,self.datasource.schema)
-            if self.sql and self.sql != sql:
+            if not self.sql or self.sql != sql:
                 self.last_modify_time = time
                 self.status = self.next_status(ResourceAction.UPDATE)
                 self.sql = sql
@@ -366,9 +366,9 @@ class Layer(BorgModel,ResourceStatusMixin,TransactionMixin):
         bbox = meta_data.get("bounding_box",None)
         crs = meta_data.get("crs",None)
         #update catalog service
-        print json.dumps(meta_data)
         res = requests.post("{}/catalogue/api/records/".format(settings.CSW_URL),json=meta_data,auth=(settings.CSW_USER,settings.CSW_PASSWORD))
-        print(res.content)
+        if 400 <= res.status_code < 600 and res.content:
+            res.reason = "{}({})".format(res.reason,res.content)
         res.raise_for_status()
         meta_data = res.json()
 
