@@ -2462,11 +2462,12 @@ class Publish(Transform,ResourceStatusMixin,SpatialTableMixin):
                 meta_data["crs"] = st.crs
 
         meta_data["styles"] = []
-        for style_format in ["sld","qml","lyr"]:
-            f = self.builtin_style_file(style_format)
-            if f:
-                with open(f,"r") as r:
-                    meta_data["styles"].append({"content":(self.format_sld_style(r.read()) if style_format == "sld" else r.read()).encode("base64"),"format":style_format.upper()})
+        if self.workspace.publish_channel.sync_geoserver_data:
+            for style_format in ["sld","qml","lyr"]:
+                f = self.builtin_style_file(style_format)
+                if f:
+                    with open(f,"r") as r:
+                        meta_data["styles"].append({"content":(self.format_sld_style(r.read()) if style_format == "sld" else r.read()).encode("base64"),"format":style_format.upper()})
 
         #OWS info
         meta_data["ows_resource"] = {}
@@ -2504,9 +2505,8 @@ class Publish(Transform,ResourceStatusMixin,SpatialTableMixin):
             styles = meta_data.get("styles",[])
             #filter out qml and lyr styles
             sld_styles = [s for s in meta_data.get("styles",[]) if s["format"].lower() == "sld"]
-            meta_data["styles"] = sld_styles
+            meta_data["styles"] = {}
             if style_dump_dir:
-                meta_data["styles"] = {}
                 if not os.path.exists(style_dump_dir):
                     os.makedirs(style_dump_dir)
 
@@ -2523,6 +2523,11 @@ class Publish(Transform,ResourceStatusMixin,SpatialTableMixin):
                         meta_data["styles"][style["name"]] = {"file":"{}{}".format(BorgConfiguration.MASTER_PATH_PREFIX, style_file),"default":style["default"],"md5":file_md5(style_file)}
                     else:
                         meta_data["styles"][style["name"]] = {"file":"{}{}".format(BorgConfiguration.MASTER_PATH_PREFIX, style_file),"default":style["default"]}
+                else:
+                    meta_data["styles"][style["name"]] = {"content":style["raw_content"].decode("base64")}
+
+        else:
+            meta_data["styles"] = None
 
         #add extra data to meta data
         meta_data["workspace"] = self.workspace.name
