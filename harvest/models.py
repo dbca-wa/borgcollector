@@ -123,10 +123,13 @@ class Job(models.Model):
 
     @property
     def dump_dir(self):
-        if self.publish.workspace.workspace_as_schema:
-            return os.path.join(BorgConfiguration.FULL_DATA_DUMP_DIR,self.publish.workspace.publish_channel.name, self.publish.workspace.name, self.batch_id)
+        if self.publish:
+            if self.publish.workspace.workspace_as_schema:
+                return os.path.join(BorgConfiguration.FULL_DATA_DUMP_DIR,self.publish.workspace.publish_channel.name, self.publish.workspace.name, self.batch_id)
+            else:
+                return os.path.join(BorgConfiguration.FULL_DATA_DUMP_DIR,self.publish.workspace.publish_channel.name, self.batch_id)
         else:
-            return os.path.join(BorgConfiguration.FULL_DATA_DUMP_DIR,self.publish.workspace.publish_channel.name, self.batch_id)
+            return None
 
     def __str__(self):
         return str(self.pk)
@@ -142,7 +145,7 @@ class JobEventListener(object):
             raise Exception("Unfinished job can not be deleted.")
         #remove the dump file if exist
         dump_dir = instance.dump_dir
-        if os.path.exists(dump_dir):
+        if dump_dir and os.path.exists(dump_dir):
             existed_files = 0
             for f in os.listdir(dump_dir):
                 if f.startswith(instance.publish.table_name + "."):
