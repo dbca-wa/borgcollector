@@ -90,9 +90,9 @@ class RepeatedJob(object):
             else:
                 p.last_message = self.last_message
         except:
-            logger.info("Failed to run job ({})".format(self.name))
             p.status = "error"
             p.last_message = traceback.format_exc()
+            logger.error("Failed to run job ({}).\n{}".format(self.name,p.last_message))
 
         p.last_endtime = timezone.now()
 
