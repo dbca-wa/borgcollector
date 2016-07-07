@@ -254,8 +254,6 @@ class MudmapResource(DjangoResource,BasicHttpAuthMixin):
                     workspace=workspace,
                     interval=JobInterval.Manually,
                     status=ResourceStatus.Enabled,
-                    kmi_title=name,
-                    kmi_abstract=name,
                     input_table=mudmap_input,sql="$$".join(Publish.TRANSFORM).strip()
                 )
             mudmap_publish.full_clean(exclude=["interval"])   
