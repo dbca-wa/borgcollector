@@ -475,7 +475,7 @@ class InputAdmin(VersionAdmin,JobFields):
 
     def get_fields(self, request, obj=None):
         if (obj and hasattr(obj,"data_source")) or "data_source" in request.POST:
-            if (obj.data_source.type if obj else request.POST.get("data_source")) == DatasourceType.DATABASE:
+            if (obj.data_source.type if obj else DataSource.objects.get(pk=int(request.POST.get("data_source"))).type) == DatasourceType.DATABASE:
                 if hasattr(obj,"foreign_table") if obj else "foreign_table" in request.POST:
                     base_fields = ["name","data_source","foreign_table","generate_rowid","source"]
                 else:
