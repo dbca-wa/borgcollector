@@ -82,13 +82,11 @@ class InputForm(BorgModelForm):
             widget=BorgSelect(attrs={"onChange":"$('#input_form').append(\"<input type='hidden' name='_change_foreign_table' value=''>\"); $('#input_form').submit()"}))
     def __init__(self, *args, **kwargs):
         super(InputForm, self).__init__(*args, **kwargs)
+        #remote the "+" icon from html page because this will trigger onchange event and cause recusive submit html form to server
+        self.fields['data_source'].widget = self.fields['data_source'].widget.widget
         if 'instance' in kwargs and  kwargs['instance'] and kwargs['instance'].pk:
             self.fields['name'].widget.attrs['readonly'] = True
-
-            #remote the "+" icon from html page because this field is readonly
-            self.fields['data_source'].widget = self.fields['data_source'].widget.widget
             self.fields['data_source'].widget.attrs['readonly'] = True
-            #remote the "+" icon from html page because this field is readonly
             self.fields['foreign_table'].widget.attrs['readonly'] = True
 
     def get_mode(self,data):
@@ -130,7 +128,7 @@ class InputForm(BorgModelForm):
         model = Input
         fields = "__all__"
         widgets = {
-                'data_source': BorgSelect(attrs={"onChange":"$('#input_form').append(\"<input type='hidden' name='_change_data_source' value=''>\"); $('#input_form').submit()"}),
+                'data_source': BorgSelect(attrs={"onChange":"$('#input_form').append(\"<input type='hidden' name='_change_data_source' value=''>\"); $('#input_form').submit();"}),
         }
 
 class NormalTableForm(BorgModelForm):
