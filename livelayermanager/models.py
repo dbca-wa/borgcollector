@@ -270,8 +270,6 @@ class Layer(BorgModel,ResourceStatusMixin,TransactionMixin):
     crs = models.CharField(max_length=64,editable=False,null=True,blank=True)
     bbox = models.CharField(max_length=128,null=True,editable=False)
     name = models.CharField(max_length=256,null=True,editable=True,blank=True,unique=True)
-    title = models.CharField(max_length=512,null=True,editable=True,blank=True)
-    abstract = models.TextField(null=True,editable=True,blank=True)
     geoserver_setting = models.TextField(blank=True,null=True,editable=False)
     status = models.CharField(max_length=32, null=False, editable=False,choices=ResourceStatus.layer_status_options)
 
@@ -332,8 +330,6 @@ class Layer(BorgModel,ResourceStatusMixin,TransactionMixin):
             meta_data["service_type"] = "WFS"
             meta_data["service_type_version"] = self.datasource.workspace.publish_channel.wfs_version
 
-        meta_data["title"] = self.title
-        meta_data["abstract"] = self.abstract
         meta_data["modified"] = (self.last_modify_time or self.last_refresh_time).astimezone(timezone.get_default_timezone()).strftime("%Y-%m-%d %H:%M:%S.%f")
 
         #bbox
@@ -359,14 +355,14 @@ class Layer(BorgModel,ResourceStatusMixin,TransactionMixin):
 
         return meta_data
 
-    def update_catalogue_service(self,extra_datas=None):
+    def update_catalogue_service(self,md5=False,extra_datas=None):
         meta_data = self.builtin_metadata
         if extra_datas:
             meta_data.update(extra_datas)
         bbox = meta_data.get("bounding_box",None)
         crs = meta_data.get("crs",None)
         #update catalog service
-        res = requests.post("{}/catalogue/api/records/".format(settings.CSW_URL),json=meta_data,auth=(settings.CSW_USER,settings.CSW_PASSWORD))
+        res = requests.post("{}/catalogue/api/records/?style_content=true".format(settings.CSW_URL),json=meta_data,auth=(settings.CSW_USER,settings.CSW_PASSWORD))
         if 400 <= res.status_code < 600 and res.content:
             res.reason = "{}({})".format(res.reason,res.content)
         res.raise_for_status()
@@ -386,7 +382,7 @@ class Layer(BorgModel,ResourceStatusMixin,TransactionMixin):
                 #default sld file
                 meta_data["default_style"] = style["name"]
             #write the style into file system
-            style_file = os.path.join(style_dump_dir,"{}.{}.sld".format(self.table_name,style["name"]))
+            style_file = os.path.join(style_dump_dir,"{}.{}.{}.sld".format(self.datasource.workspace.name,self.kmi_name,style["name"]))
             with open(style_file,"wb") as f:
                 f.write(style["raw_content"].decode("base64"))
             if md5:
@@ -487,7 +483,7 @@ class Layer(BorgModel,ResourceStatusMixin,TransactionMixin):
         try_set_push_owner("livelayer")
         hg = None
         try:
-            meta_data = self.update_catalogue_service(extra_datas={"publication_date":datetime.now().strftime("%Y-%m-%d %H:%M:%S.%f")})
+            meta_data = self.update_catalogue_service(md5=True,extra_datas={"publication_date":datetime.now().strftime("%Y-%m-%d %H:%M:%S.%f")})
 
             #write meta data file
             file_name = "{}.{}.meta.json".format(self.datasource.workspace.name,self.kmi_name)
