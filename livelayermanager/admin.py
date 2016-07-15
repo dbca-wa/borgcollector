@@ -156,7 +156,7 @@ class DatasourceAdmin(admin.ModelAdmin):
         return actions 
 
 class AbstractLayerAdmin(admin.ModelAdmin):
-    list_display = ("table","name","_workspace","_datasource","spatial_type_desc","title","crs", "status","last_publish_time","last_refresh_time")
+    list_display = ("table","name","_workspace","_datasource","spatial_type_desc","crs", "status","last_publish_time","last_refresh_time")
     readonly_fields = ("_workspace","_datasource","spatial_type_desc","crs","_bounding_box", "status","_sql","last_publish_time","last_unpublish_time", "last_refresh_time","last_modify_time")
     search_fields = ["table", "name"]
     ordering = ("datasource","name","table")
