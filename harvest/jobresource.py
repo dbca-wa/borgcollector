@@ -30,7 +30,7 @@ from livelayermanager.models import Layer as LiveLayer
 from borg_utils.hg_batch_push import try_set_push_owner, try_clear_push_owner, try_push_to_repository
 from borg_utils.jobintervals import JobInterval
 from borg_utils.borg_config import BorgConfiguration
-from borg_utils.resource_status import ResourceStatus
+from borg_utils.resource_status import ResourceStatus,ResourceAction
 from harvest.jobstates import Completed
 
 logger = logging.getLogger(__name__)
@@ -155,7 +155,9 @@ class MetaResource(DjangoResource,BasicHttpAuthMixin):
                         try:
                             livelayer = LiveLayer.objects.filter(datasource__workspace=workspace).get(Q(name=name) | Q(table=name))
                             try:
-                                livelayer.publish()
+                                target_status = livelayer.next_status(ResourceAction.PUBLISH)
+                                livelayer.status = target_status
+                                livelayer.save(update_fields=["status","last_publish_time"])
                                 resp[layer]["status"] = True
                                 resp[layer]["message"] = "Succeed."
                             except :
@@ -170,7 +172,9 @@ class MetaResource(DjangoResource,BasicHttpAuthMixin):
                             try:
                                 wmslayer = WmsLayer.objects.get(server__workspace=workspace,kmi_name=name)
                                 try:
-                                    wmslayer.publish()
+                                    target_status = wmslayer.next_status(ResourceAction.PUBLISH)
+                                    wmslayer.status = target_status
+                                    wmslayer.save(update_fields=["status","last_publish_time"])
                                     resp[layer]["status"] = True
                                     resp[layer]["message"] = "Succeed."
                                 except:
