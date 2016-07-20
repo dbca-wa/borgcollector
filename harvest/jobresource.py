@@ -127,9 +127,8 @@ class MetaResource(DjangoResource,BasicHttpAuthMixin):
                 resp[layer] = {}
                 #get the workspace object
                 try:
-                    try:
-                        workspace = Workspace.objects.get(name=workspace)
-                    except Workspace.DoesNotExist:
+                    workspaces = Workspace.objects.filter(name=workspace)
+                    if not len(workspaces):
                         #workspace does not exist
                         resp["status"] = False
                         resp[layer]["status"] = False
@@ -138,7 +137,7 @@ class MetaResource(DjangoResource,BasicHttpAuthMixin):
                     
                     try:
                         #try to locate it from publishs, and publish the meta data if found
-                        pub = Publish.objects.get(workspace=workspace,name=name)
+                        pub = Publish.objects.get(workspace__in=workspaces,name=name)
                         try:
                             pub.publish_meta_data()
                             resp[layer]["status"] = True
@@ -153,7 +152,7 @@ class MetaResource(DjangoResource,BasicHttpAuthMixin):
                     except Publish.DoesNotExist:
                         #not a publish object, try to locate it from live layers, and publish it if found
                         try:
-                            livelayer = LiveLayer.objects.filter(datasource__workspace=workspace).get(Q(name=name) | Q(table=name))
+                            livelayer = LiveLayer.objects.filter(datasource__workspace__in=workspaces).get(Q(name=name) | Q(table=name))
                             try:
                                 target_status = livelayer.next_status(ResourceAction.PUBLISH)
                                 livelayer.status = target_status
@@ -170,7 +169,7 @@ class MetaResource(DjangoResource,BasicHttpAuthMixin):
                         except LiveLayer.DoesNotExist:
                             #not a publish object, try to locate it from wms layers, and publish it if found
                             try:
-                                wmslayer = WmsLayer.objects.get(server__workspace=workspace,kmi_name=name)
+                                wmslayer = WmsLayer.objects.get(server__workspace__in=workspaces,kmi_name=name)
                                 try:
                                     target_status = wmslayer.next_status(ResourceAction.PUBLISH)
                                     wmslayer.status = target_status
