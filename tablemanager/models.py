@@ -504,7 +504,7 @@ class Input(JobFields):
     foreign_table = models.ForeignKey(ForeignTable, null=True, blank=True, help_text="Foreign table to update VRT from")
     generate_rowid = models.BooleanField(null=False, default=False, help_text="If true, a _rowid column will be added and filled with row data's hash value")
     source = DatasourceField(help_text="GDAL VRT definition in xml", unique=True)
-    advanced_options = models.CharField(max_length=128, null=True, editable=True,blank=True,help_text="Advanced ogr2ogr options")
+    advanced_options = models.CharField(max_length=128, null=True, editable=False,blank=True,help_text="Advanced ogr2ogr options")
     info = models.TextField(editable=False)
     spatial_type = models.IntegerField(default=1,editable=False)
     create_table_sql = models.TextField(null=True, editable=False)
@@ -1027,10 +1027,10 @@ class Input(JobFields):
 
         if self.advanced_options:
             cmd += self.advanced_options.split()
-        if not self.advanced_options or all([self.advanced_options.find(f) < 0 for f in ["-a_srs","-s_srs","-t_srs"]]):
-            srid = detect_epsg(self.vrt.name)
-            if srid:
-                cmd += ['-a_srs', srid]
+
+        srid = detect_epsg(self.vrt.name)
+        if srid:
+            cmd += ['-a_srs', srid]
         logger.info(" ".join(cmd))
         cancelled = False
         p = subprocess.Popen(cmd,stdout=subprocess.PIPE,stderr=subprocess.PIPE)
@@ -1060,7 +1060,6 @@ class Input(JobFields):
             returncode = p.wait()
             output = p.communicate()
             if returncode != signal.SIGTERM * -1 and output[1].strip():
-                logger.error(output[1])
                 raise Exception(output[1])
 
         else:
