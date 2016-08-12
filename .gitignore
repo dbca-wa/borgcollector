@@ -13,3 +13,9 @@ master
 preview
 borgcollector-state
 mudmap
+
+# Database/fixture dumps
+*.pgdump
+*.dump
+*.db
+*.sqlite3
