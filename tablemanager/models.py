@@ -347,7 +347,7 @@ class ForeignTable(BorgModel):
     """
     name = models.SlugField(max_length=255, unique=True, help_text="The name of foreign table", validators=[validate_slug])
     server = models.ForeignKey(DataSource,limit_choices_to={"type":DatasourceType.DATABASE})
-    sql = SQLField(default="CREATE FOREIGN TABLE \"{{schema}}\".\"{{self.name}}\" () SERVER {{self.server.name}} OPTIONS (schema '<schema>', table '<table>');")
+    sql = SQLField(default="CREATE FOREIGN TABLE \"{{schema}}\".\"{{self.name}}\" (<columns>) SERVER {{self.server.name}} OPTIONS (schema '<schema>', table '<table>');")
     last_modify_time = models.DateTimeField(auto_now=False,auto_now_add=True,editable=False,null=False)
 
     ROW_COUNT_SQL = "SELECT COUNT(*) FROM \"{0}\".\"{1}\";"
