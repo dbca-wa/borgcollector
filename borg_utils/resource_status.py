@@ -177,7 +177,7 @@ class Updated(ResourceStatus):
         if action == ResourceAction.PUBLISH:
             return (self.Published,True)
         elif action == ResourceAction.CASCADE_PUBLISH:
-            return (self.CascadedPublished,True)
+            return (self.CascadePublished,True)
         elif action == ResourceAction.UNPUBLISH:
             return (self.Unpublished,True)
         elif action == ResourceAction.CASCADE_UNPUBLISH:
