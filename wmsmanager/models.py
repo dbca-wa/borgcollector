@@ -105,7 +105,16 @@ class WmsServer(models.Model,ResourceStatusMixin,TransactionMixin):
 
     @property
     def get_capability_url(self):
-        return "{0}?service=WMS&request=GetCapabilities&version=1.1.1".format(self.capability_url)
+        if not hasattr(self,"_capability_url"):
+            url = self.capability_url.split("?", 1)
+            url, parameters = (url[0], url[1].split("&")) if len(url) == 2 else (url[0], [])
+            parameters = dict([(p.split("=", 1) if len(p.split("=",1)) == 2 else (p,"")) for p in parameters if p]) 
+            default_parameters = {"SERVICE":"WMS","REQUEST":"GetCapabilities","VERSION":"1.1.1"}
+            for k,v in default_parameters.iteritems():
+                if not re.compile("{}=".format(k),re.IGNORECASE).search(self.capability_url):
+                    parameters[k] = v
+            setattr(self,"_capability_url" , "{}?{}".format(url,urllib.urlencode(parameters)))
+        return self._capability_url
 
     def refresh_layers(self,save=True):
         result = None
