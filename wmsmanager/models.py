@@ -435,6 +435,8 @@ class WmsLayer(models.Model,ResourceStatusMixin,TransactionMixin):
         meta_data["native_name"] = self.name
         meta_data["store"] = self.server.name
         meta_data["auth_level"] = self.server.workspace.auth_level
+        meta_data["preview_path"] = "{}{}".format(BorgConfiguration.MASTER_PATH_PREFIX, BorgConfiguration.PREVIEW_DIR)
+        meta_data["spatial_data"] = True
 
         meta_data["channel"] = self.server.workspace.publish_channel.name
         meta_data["sync_geoserver_data"] = self.server.workspace.publish_channel.sync_geoserver_data
