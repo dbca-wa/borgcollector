@@ -121,6 +121,10 @@ class CreateJob(RepeatedJob):
         return JobStatemachine.create_jobs(self._interval,RepeatedJob.job_batch_id)
 
 class HarvestJob(RepeatedJob):
+    def __init__(self,interval,options=None):
+        self._first_run = True
+        super(HarvestJob,self).__init__(interval,options)
+
     @property
     def name(self):
         return "harvest"
@@ -134,7 +138,10 @@ class HarvestJob(RepeatedJob):
         return "{} jobs succeed, {} jobs failed, {} jobs ignored, {} jobs running into error."
 
     def execute(self,time):
-        return JobStatemachine.run_all_jobs()
+        try:
+            return JobStatemachine.run_all_jobs(self._first_run)
+        finally:
+            self._first_run = False
 
 class CheckDsJob(RepeatedJob):
     @property
@@ -171,7 +178,7 @@ class CleanJob(RepeatedJob):
 @atexit.register
 def shutdown():
         Process.objects.filter(server=Process.current_server,pid=Process.current_pid).update(status="shutdown")
-        logger.info("Harvest management process exit.")
+        logger.info("Harvest management process exit.server={}, pid={}".format(Process.current_server,Process.current_pid))
 
 class Command(BaseCommand):
     help = 'Create harvest job'
