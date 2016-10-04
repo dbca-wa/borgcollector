@@ -229,6 +229,7 @@ class JobStatemachine(object):
         while True:
             start_time = timezone.now()
             logger.debug("job(id={0},name={1}) begins to execute state ({2})".format(job.id,job.publish.name,job.state))
+            #logger.info( "{} -{} - {}".format(job.id,current_state.name,previous_state.name))
             if current_state.is_end_state:
                 #current job is already finished.
                 logger.debug("job(id={0},name={1},state={2}) is finished".format(job.id,job.publish.name,job.state))
@@ -238,7 +239,7 @@ class JobStatemachine(object):
                 if not current_state.outcome_cls.is_manual_outcome(job.user_action):
                     #a invalid user action
                     next_state = current_state
-                    state_result = (JobStateOutcome.internal_error, "The action '{0}' is not a valid user action.".format(job.user_action))
+                    state_result = (JobStateOutcome.internal_error, "The action '{0}' is an invalid user action.".format(job.user_action))
                 else:
                     try:
                         next_state = current_state.next_state(job.user_action)
@@ -263,6 +264,7 @@ class JobStatemachine(object):
                 except:
                     #can not find the last execution time. run it
                     state_result = current_state.execute(job,previous_state)
+                #transition from error state to normal state to execute the logic again
                 next_state = current_state.next_state(state_result[0])
             else:
                 try:
@@ -339,8 +341,10 @@ class JobStatemachine(object):
                     log = last_log
 
             if current_state != next_state:
+                if (not current_state.is_error_state) and (not next_state.is_error_state):
+                    #move to next state, change the previous state
+                    job.previous_state = job.state
                 #job move to a new state, change the job state
-                job.previous_state = job.state
                 job.state = next_state.name
             else:
                 #some bad thing happens,job stays at the same state, leave the job's state untouched
@@ -376,6 +380,6 @@ class JobStatemachine(object):
                 return
 
             #set previous_state to the current state, current_state to the next_state
-            previous_state = current_state
-            current_state = next_state
+            previous_state = JobState.get_jobstate(job.previous_state)
+            current_state = JobState.get_jobstate(job.state)
 
