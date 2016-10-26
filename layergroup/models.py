@@ -74,7 +74,7 @@ class LayerGroup(models.Model,ResourceStatusMixin,TransactionMixin):
         if o:
             self.status = self.next_status(ResourceAction.UPDATE)
         else:
-            self.status = ResourceStatus.NEW
+            self.status = ResourceStatus.New
             
         self.last_modify_time = timezone.now()
 
