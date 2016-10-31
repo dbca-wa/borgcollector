@@ -294,7 +294,7 @@ class LayerGroup(models.Model,ResourceStatusMixin,TransactionMixin):
             layers = []
             for group_layer in LayerGroupLayers.objects.filter(group=self).order_by("order"):
                 if group_layer.layer and group_layer.layer.is_published:
-                    layers.append({"type":"wms_layer","name":group_layer.layer.layer_name,"store":group_layer.layer.server.name,"workspace":group_layer.layer.server.workspace.name})
+                    layers.append({"type":"wms_layer","name":group_layer.layer.name,"store":group_layer.layer.server.name,"workspace":group_layer.layer.server.workspace.name})
                 elif group_layer.publish and group_layer.publish.is_published:
                     layers.append({"type":"publish","name":group_layer.publish.name,"workspace":group_layer.publish.workspace.name})
                 elif group_layer.sub_group and group_layer.sub_group.is_published:
