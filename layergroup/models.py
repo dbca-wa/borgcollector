@@ -4,6 +4,8 @@ import logging
 import itertools
 import hglib
 import re
+import requests
+from datetime import datetime
 
 from django.db import transaction
 from django.db import models
@@ -14,6 +16,7 @@ from django.dispatch import receiver
 from django.db.models.signals import pre_save, pre_delete,post_save,post_delete
 from django.core.exceptions import ValidationError,ObjectDoesNotExist
 from django.core.validators import RegexValidator
+from django.conf import settings
 
 from tablemanager.models import Workspace,Publish
 from wmsmanager.models import WmsLayer
@@ -29,8 +32,8 @@ slug_re = re.compile(r'^[a-z0-9_]+$')
 validate_slug = RegexValidator(slug_re, "Slug can only contain lowercase letters, numbers and underscores", "invalid")
 
 SRS_CHOICES = (
-    ("EPSG:4283","EPSG:4283"),
     ("EPSG:4326","EPSG:4326"),
+    ("EPSG:3857","EPSG:3857"),
 )
 class LayerGroupEmpty(Exception):
     pass
@@ -190,10 +193,68 @@ class LayerGroup(models.Model,ResourceStatusMixin,TransactionMixin):
     def json_filename_abs(self,action='publish'):
         return os.path.join(BorgConfiguration.BORG_STATE_REPOSITORY, self.json_filename(action))
 
+    @property
+    def builtin_metadata(self):
+        meta_data = {}
+        meta_data["workspace"] = self.workspace.name
+        meta_data["name"] = self.name
+        meta_data["service_type"] = "WMS"
+        meta_data["service_type_version"] = self.workspace.publish_channel.wms_version
+        meta_data["title"] = self.title
+        meta_data["abstract"] = self.abstract
+        meta_data["modified"] = self.last_modify_time.astimezone(timezone.get_default_timezone()).strftime("%Y-%m-%d %H:%M:%S.%f") if self.last_modify_time else None
+        meta_data["crs"] = self.srs or None
+
+        #ows resource
+        meta_data["ows_resource"] = {}
+        if self.workspace.publish_channel.wms_endpoint:
+            meta_data["ows_resource"]["wms"] = True
+            meta_data["ows_resource"]["wms_version"] = self.workspace.publish_channel.wms_version
+            meta_data["ows_resource"]["wms_endpoint"] = self.workspace.publish_channel.wms_endpoint
+
+        geo_settings = json.loads(self.geoserver_setting) if self.geoserver_setting else {}
+        if geo_settings.get("create_cache_layer",False) and self.workspace.publish_channel.gwc_endpoint:
+            meta_data["ows_resource"]["gwc"] = True
+            meta_data["ows_resource"]["gwc_endpoint"] = self.workspace.publish_channel.gwc_endpoint
+        return meta_data
+
+    def update_catalogue_service(self, extra_datas=None):
+        meta_data = self.builtin_metadata
+        if extra_datas:
+            meta_data.update(extra_datas)
+        res = requests.post("{}/catalogue/api/records/".format(settings.CSW_URL),json=meta_data,auth=(settings.CSW_USER,settings.CSW_PASSWORD))
+        if 400 <= res.status_code < 600 and res.content:
+            res.reason = "{}({})".format(res.reason,res.content)
+        res.raise_for_status()
+        meta_data = res.json()
+
+        #add extra data to meta data
+        meta_data["workspace"] = self.workspace.name
+        meta_data["name"] = self.name
+        meta_data["native_name"] = self.name
+        meta_data["auth_level"] = self.workspace.auth_level
+        meta_data["preview_path"] = "{}{}".format(BorgConfiguration.MASTER_PATH_PREFIX, BorgConfiguration.PREVIEW_DIR)
+        meta_data["spatial_data"] = True
+
+        meta_data["channel"] = self.workspace.publish_channel.name
+        meta_data["sync_geoserver_data"] = self.workspace.publish_channel.sync_geoserver_data
+
+        if self.geoserver_setting:
+            meta_data["geoserver_setting"] = json.loads(self.geoserver_setting)
+                
+        return meta_data
+
+
+
     def unpublish(self):
         """
         unpublish layer group
         """
+        #remove it from catalogue service
+        res = requests.delete("{}/catalogue/api/records/{}:{}/".format(settings.CSW_URL,self.workspace.name,self.name),auth=(settings.CSW_USER,settings.CSW_PASSWORD))
+        if res.status_code != 404:
+            res.raise_for_status()
+
         json_files = [ self.json_filename_abs(action) for action in [ 'publish','empty_gwc' ] ]
         #get all existing files.
         json_files = [ f for f in json_files if os.path.exists(f) ]
@@ -225,6 +286,7 @@ class LayerGroup(models.Model,ResourceStatusMixin,TransactionMixin):
         try_set_push_owner("layergroup")
         hg = None
         try:
+            json_out = self.update_catalogue_service(extra_datas={"publication_date": datetime.now().strftime("%Y-%m-%d %H:%M:%S.%f")})
             layers = []
             for group_layer in LayerGroupLayers.objects.filter(group=self).order_by("order"):
                 if group_layer.layer and group_layer.layer.is_published:
@@ -236,13 +298,8 @@ class LayerGroup(models.Model,ResourceStatusMixin,TransactionMixin):
             if not layers:
                 #layergroup is empty,remove it.
                 raise LayerGroupEmpty("Layer group can't be empty.")
-            json_out = {}
-            json_out["layers"] = layers;
-            json_out["name"] = self.name
-            json_out["title"] = self.title or ""
-            json_out["abstract"] = self.abstract or ""
-            json_out["workspace"] = self.workspace.name
-            json_out["srs"] = self.srs
+            json_out["layers"] = layers
+            json_out["srs"] = self.srs or None
             json_out["publish_time"] = timezone.localtime(timezone.now()).strftime("%Y-%m-%d %H:%M:%S.%f")
             inclusions = self.get_inclusions()
             dependent_groups = []
@@ -250,9 +307,6 @@ class LayerGroup(models.Model,ResourceStatusMixin,TransactionMixin):
                 if group.is_published:
                     dependent_groups.append({"name":group.name,"workspace":group.workspace.name})
             json_out["dependent_groups"] = dependent_groups
-        
-            if self.geoserver_setting:
-                json_out["geoserver_setting"] = json.loads(self.geoserver_setting)
         
             #create the dir if required
             if not os.path.exists(os.path.dirname(json_filename)):
