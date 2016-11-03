@@ -4,6 +4,8 @@ import logging
 import itertools
 import hglib
 import re
+import requests
+from datetime import datetime
 
 from django.db import transaction
 from django.db import models
@@ -14,6 +16,7 @@ from django.dispatch import receiver
 from django.db.models.signals import pre_save, pre_delete,post_save,post_delete
 from django.core.exceptions import ValidationError,ObjectDoesNotExist
 from django.core.validators import RegexValidator
+from django.conf import settings
 
 from tablemanager.models import Workspace,Publish
 from wmsmanager.models import WmsLayer
@@ -29,8 +32,8 @@ slug_re = re.compile(r'^[a-z0-9_]+$')
 validate_slug = RegexValidator(slug_re, "Slug can only contain lowercase letters, numbers and underscores", "invalid")
 
 SRS_CHOICES = (
-    ("EPSG:4283","EPSG:4283"),
     ("EPSG:4326","EPSG:4326"),
+    ("EPSG:3857","EPSG:3857"),
 )
 class LayerGroupEmpty(Exception):
     pass
@@ -200,13 +203,11 @@ class LayerGroup(models.Model,ResourceStatusMixin,TransactionMixin):
         meta_data["title"] = self.title
         meta_data["abstract"] = self.abstract
         meta_data["modified"] = self.last_modify_time.astimezone(timezone.get_default_timezone()).strftime("%Y-%m-%d %H:%M:%S.%f") if self.last_modify_time else None
-
-        #bbox
-        meta_data["srs"] = self.srs or None
+        meta_data["crs"] = self.srs or None
 
         #ows resource
         meta_data["ows_resource"] = {}
-        if self.server.workspace.publish_channel.wms_endpoint:
+        if self.workspace.publish_channel.wms_endpoint:
             meta_data["ows_resource"]["wms"] = True
             meta_data["ows_resource"]["wms_version"] = self.workspace.publish_channel.wms_version
             meta_data["ows_resource"]["wms_endpoint"] = self.workspace.publish_channel.wms_endpoint
@@ -231,21 +232,16 @@ class LayerGroup(models.Model,ResourceStatusMixin,TransactionMixin):
         meta_data["workspace"] = self.workspace.name
         meta_data["name"] = self.name
         meta_data["native_name"] = self.name
-        meta_data["auth_level"] = self.server.workspace.auth_level
+        meta_data["auth_level"] = self.workspace.auth_level
         meta_data["preview_path"] = "{}{}".format(BorgConfiguration.MASTER_PATH_PREFIX, BorgConfiguration.PREVIEW_DIR)
         meta_data["spatial_data"] = True
 
-        meta_data["channel"] = self.server.workspace.publish_channel.name
-        meta_data["sync_geoserver_data"] = self.server.workspace.publish_channel.sync_geoserver_data
+        meta_data["channel"] = self.workspace.publish_channel.name
+        meta_data["sync_geoserver_data"] = self.workspace.publish_channel.sync_geoserver_data
 
         if self.geoserver_setting:
             meta_data["geoserver_setting"] = json.loads(self.geoserver_setting)
                 
-        #bbox
-        if "bounding_box" in meta_data:
-            del meta_data["bounding_box"]
-        meta_data["bbox"] = bbox
-
         return meta_data
 
 
@@ -302,7 +298,8 @@ class LayerGroup(models.Model,ResourceStatusMixin,TransactionMixin):
             if not layers:
                 #layergroup is empty,remove it.
                 raise LayerGroupEmpty("Layer group can't be empty.")
-            json_out["layers"] = layers;
+            json_out["layers"] = layers
+            json_out["srs"] = self.srs or None
             json_out["publish_time"] = timezone.localtime(timezone.now()).strftime("%Y-%m-%d %H:%M:%S.%f")
             inclusions = self.get_inclusions()
             dependent_groups = []
