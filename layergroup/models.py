@@ -67,6 +67,7 @@ class LayerGroup(models.Model,ResourceStatusMixin,TransactionMixin):
         if (o 
             and o.name == self.name 
             and o.title == self.title
+            and o.srs == self.srs
             and o.workspace == self.workspace
             and o.abstract == self.abstract
             and o.geoserver_setting == self.geoserver_setting
