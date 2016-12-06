@@ -6,6 +6,7 @@ import logging
 import hglib
 import urllib
 import traceback
+import mimetypes
 from xml.etree import ElementTree
 from xml.dom import minidom
 from datetime import datetime
@@ -34,6 +35,8 @@ logger = logging.getLogger(__name__)
 
 slug_re = re.compile(r'^[a-zA-Z_][a-zA-Z0-9_]+$')
 validate_slug = RegexValidator(slug_re, "Slug can only start with letters or underscore, and contain letters, numbers and underscore", "invalid")
+
+getcapabilities_ns = {"xlink":"http://www.w3.org/1999/xlink"}
 
 default_layer_geoserver_setting = { 
                    "create_cache_layer": True,
@@ -160,6 +163,9 @@ class WmsServer(models.Model,ResourceStatusMixin,TransactionMixin):
             kmi_name = layer_name.replace(":","_").replace(" ","_")
             layer_abstract_element = layer.find("Abstract")
             boundingbox_element = layer.find("BoundingBox")
+            style_element = layer.find("Style")
+            legend_element = style_element.find("LegendURL") if style_element is not None else None
+            legendurl_element = legend_element.find("OnlineResource") if legend_element is not None else None
             crs = None
             bbox = None
             if boundingbox_element is not None:
@@ -173,11 +179,11 @@ class WmsServer(models.Model,ResourceStatusMixin,TransactionMixin):
             if existed_layer:
                 #layer already existed
                 changed = False
-                if existed_layer.title != (layer_title_element.text if layer_title_element else None):
-                    existed_layer.title = layer_title_element.text if layer_title_element else None
+                if existed_layer.title != (layer_title_element.text if layer_title_element is not None else None):
+                    existed_layer.title = layer_title_element.text if layer_title_element is not None else None
                     changed = True
-                if existed_layer.abstract != (layer_abstract_element.text if layer_abstract_element else None):
-                    existed_layer.abstract = layer_abstract_element.text if layer_abstract_element else None
+                if existed_layer.abstract != (layer_abstract_element.text if layer_abstract_element is not None else None):
+                    existed_layer.abstract = layer_abstract_element.text if layer_abstract_element is not None else None
                     changed = True
                 
                 if existed_layer.crs != crs:
@@ -193,6 +199,7 @@ class WmsServer(models.Model,ResourceStatusMixin,TransactionMixin):
 
                 existed_layer.path = path
                 existed_layer.last_refresh_time = process_time
+                existed_layer.legend = legendurl_element.get("{{{}}}href".format(getcapabilities_ns['xlink']),None) if legendurl_element is not None else None
                 if existed_layer.last_modify_time is None:
                     existed_layer.geoserver_setting = default_layer_geoserver_setting_json
                 existed_layer.save()
@@ -351,6 +358,7 @@ class WmsLayer(models.Model,ResourceStatusMixin,TransactionMixin):
     abstract = models.TextField(null=True,editable=False)
     kmi_name = models.SlugField(max_length=128,null=False,editable=True,blank=False, validators=[validate_slug])
     path = models.CharField(max_length=512,null=True,editable=False)
+    legend = models.CharField(max_length=512,null=True,editable=False)
     applications = models.TextField(blank=True,null=True,editable=False)
     geoserver_setting = models.TextField(blank=True,null=True,editable=False)
     status = models.CharField(max_length=32, null=False, editable=False,choices=ResourceStatus.layer_status_options)
@@ -414,6 +422,12 @@ class WmsLayer(models.Model,ResourceStatusMixin,TransactionMixin):
         if geo_settings.get("create_cache_layer",False) and self.server.workspace.publish_channel.gwc_endpoint:
             meta_data["ows_resource"]["gwc"] = True
             meta_data["ows_resource"]["gwc_endpoint"] = self.server.workspace.publish_channel.gwc_endpoint
+
+        if self.legend:
+            res = requests.get(self.legend,auth=(self.server.user,self.server.password))
+            res.raise_for_status()
+            meta_data["source_legend"] = {"content":res.content.encode("base64"),"ext":mimetypes.guess_extension(res.headers.get("content-type",None))}
+
         return meta_data
 
     def update_catalogue_service(self,extra_datas=None):
