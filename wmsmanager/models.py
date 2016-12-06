@@ -148,7 +148,13 @@ class WmsServer(models.Model,ResourceStatusMixin,TransactionMixin):
                 self.save()
         refresh_select_choices.send(self,choice_family="wmslayer")
 
-                
+    @staticmethod
+    def getCrsPriority(crs):
+        try:
+            return ["EPSG:4326","EPSG:4283","EPSG:3857"].index(crs)
+        except:
+            return 999999
+
     def _process_layer_xml(self,layer,process_time,path=None):
         """
         process layer xml.
@@ -162,15 +168,26 @@ class WmsServer(models.Model,ResourceStatusMixin,TransactionMixin):
             layer_name = layer_name_element.text
             kmi_name = layer_name.replace(":","_").replace(" ","_")
             layer_abstract_element = layer.find("Abstract")
-            boundingbox_element = layer.find("BoundingBox")
+            boundingbox_iter = layer.iterfind("BoundingBox")
             style_element = layer.find("Style")
             legend_element = style_element.find("LegendURL") if style_element is not None else None
             legendurl_element = legend_element.find("OnlineResource") if legend_element is not None else None
             crs = None
+            crsPosition = None
+            tmpcrs = None
+            tmpcrsPosition = None
             bbox = None
-            if boundingbox_element is not None:
-                crs = boundingbox_element.get("SRS",None)
-                bbox = "[{},{},{},{}]".format(boundingbox_element.get("minx",None),boundingbox_element.get("miny",None),boundingbox_element.get("maxx",None),boundingbox_element.get("maxy",None))
+            for boundingbox_element in boundingbox_iter:
+                tmpcrs = boundingbox_element.get("SRS",None)
+                tmpcrsPosition = self.getCrsPriority(tmpcrs)
+                if tmpcrsPosition == 0:
+                    crs = tmpcrs
+                    bbox = "[{},{},{},{}]".format(boundingbox_element.get("minx",None),boundingbox_element.get("miny",None),boundingbox_element.get("maxx",None),boundingbox_element.get("maxy",None))
+                    break
+                elif not crs or crsPosition > tmpcrsPosition:
+                    crs = tmpcrs
+                    bbox = "[{},{},{},{}]".format(boundingbox_element.get("minx",None),boundingbox_element.get("miny",None),boundingbox_element.get("maxx",None),boundingbox_element.get("maxy",None))
+                    crsPosition = tmpcrsPosition
 
             try:
                 existed_layer = WmsLayer.objects.get(server = self,name=layer_name)
@@ -424,9 +441,13 @@ class WmsLayer(models.Model,ResourceStatusMixin,TransactionMixin):
             meta_data["ows_resource"]["gwc_endpoint"] = self.server.workspace.publish_channel.gwc_endpoint
 
         if self.legend:
-            res = requests.get(self.legend,auth=(self.server.user,self.server.password))
-            res.raise_for_status()
-            meta_data["source_legend"] = {"content":res.content.encode("base64"),"ext":mimetypes.guess_extension(res.headers.get("content-type",None))}
+            try:
+                res = requests.get(self.legend,auth=(self.server.user,self.server.password))
+                res.raise_for_status()
+                meta_data["source_legend"] = {"content":res.content.encode("base64"),"ext":mimetypes.guess_extension(res.headers.get("content-type",None))}
+            except:
+                logger.error(traceback.format_exc())
+                
 
         return meta_data
 
