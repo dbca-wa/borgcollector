@@ -5,6 +5,7 @@ import logging
 import traceback
 import time
 from datetime import timedelta
+import requests
 
 from restless.dj import DjangoResource
 from restless.resources import skip_prepare
@@ -19,10 +20,13 @@ except ImportError:
 from django.contrib import auth
 from django.utils import timezone
 from django.db.models import Q
+from django.views.generic import View
+from django.http import Http404,HttpResponse
+from django.shortcuts import get_object_or_404
 
 from harvest.models import Job
 from tablemanager.models import Publish,Workspace,Input,DataSource
-from wmsmanager.models import WmsLayer
+from wmsmanager.models import WmsLayer,WmsServer
 from harvest.jobstatemachine import JobStatemachine
 from monitor.models import SlaveServer,PublishSyncStatus
 from livelayermanager.models import Layer as LiveLayer
@@ -63,8 +67,23 @@ class BasicHttpAuthMixin(object):
                     request.user = user
         return request.user.is_authenticated()
 
+class LegendApi(View):
+    @staticmethod
+    def urls():
+        return [
+            url(r'^legends/(?P<server>.+)/(?P<layer>.+)/$',LegendApi.as_view(),name='legends'),
+        ]
+     
+    def get(self,request,server,layer):
+        wmsServer = get_object_or_404(WmsServer,pk=server)
+        wmslayer = get_object_or_404(WmsLayer,server=wmsServer,name=layer)
+        if not wmslayer.legend :
+            raise Http404("Legend not found for layer({}:{})".format(wmsServer.name,layer))
+        res = requests.get(wmslayer.legend,auth=(wmsServer.user,wmsServer.password),stream=True)
+        res.raise_for_status()
+        return HttpResponse(res.raw,res.headers.get('content-type',None))
 
-class JobResource(DjangoResource,BasicHttpAuthMixin):
+class JobApi(DjangoResource,BasicHttpAuthMixin):
     def is_authenticated(self):
         if self.request.user.is_authenticated():
             return True
@@ -74,7 +93,7 @@ class JobResource(DjangoResource,BasicHttpAuthMixin):
     @staticmethod
     def urls():
         return [
-            url(r'^jobs/$',JobResource.as_list(),name='create_job'),
+            url(r'^jobs/$',JobApi.as_list(),name='create_job'),
         ]
      
     @skip_prepare
@@ -103,7 +122,7 @@ class JobResource(DjangoResource,BasicHttpAuthMixin):
 
         return resp
 
-class MetaResource(DjangoResource,BasicHttpAuthMixin):
+class MetadataApi(DjangoResource,BasicHttpAuthMixin):
     def is_authenticated(self):
         if self.request.user.is_authenticated():
             return True
@@ -113,7 +132,7 @@ class MetaResource(DjangoResource,BasicHttpAuthMixin):
     @staticmethod
     def urls():
         return[
-            url(r'^metajobs/$',MetaResource.as_list(),name='publish_meta'),
+            url(r'^metajobs/$',MetadataApi.as_list(),name='publish_meta'),
         ]
      
     @skip_prepare
@@ -347,7 +366,7 @@ class MudmapResource(DjangoResource,BasicHttpAuthMixin):
             logger.error(traceback.format_exc())
             raise
     
-class PublishResource(DjangoResource,BasicHttpAuthMixin):
+class PublishStatusApi(DjangoResource,BasicHttpAuthMixin):
     def is_authenticated(self):
         if self.request.user.is_authenticated():
             return True
@@ -357,7 +376,7 @@ class PublishResource(DjangoResource,BasicHttpAuthMixin):
     @staticmethod
     def urls():
         return [
-            url(r'^publishs/(?P<name>[a-zA-Z0-9_\-]+)/$',PublishResource.as_detail(),name='publish_status'),
+            url(r'^publishs/(?P<name>[a-zA-Z0-9_\-]+)/$',PublishStatusApi.as_detail(),name='publish_status'),
         ]
      
 
@@ -445,5 +464,5 @@ class PublishResource(DjangoResource,BasicHttpAuthMixin):
             raise
 
 
-urlpatterns =  JobResource.urls() + MetaResource.urls() + MudmapResource.urls() + PublishResource.urls()
+urlpatterns =  JobApi.urls() + MetadataApi.urls() + LegendApi.urls()
 

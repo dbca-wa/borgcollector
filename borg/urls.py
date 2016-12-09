@@ -5,7 +5,7 @@ from django.conf.urls.static import static
 from borg.admin import site
 from filemanager.views import FileDownloadView
 import harvest.urls
-from harvest.jobresource import urlpatterns as apiurlpatterns
+from borg.api import urlpatterns as apiurlpatterns
 urlpatterns = [
     url(r'^', include(site.urls)),
     url(r'^job/', include(harvest.urls)),

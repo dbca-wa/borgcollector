@@ -161,7 +161,7 @@ class WmsServerAdmin(admin.ModelAdmin):
 
 class AbstractWmsLayerAdmin(admin.ModelAdmin):
     list_display = ("name","kmi_name","_workspace","_server","title","crs", "status","last_publish_time","last_unpublish_time","last_modify_time")
-    readonly_fields = ("_workspace","_server","path","title","abstract","crs","_bounding_box", "status","applications","last_publish_time","last_unpublish_time", "last_refresh_time","last_modify_time")
+    readonly_fields = ("_workspace","_server","path","title","abstract","crs","_bounding_box","_legend", "status","applications","last_publish_time","last_unpublish_time", "last_refresh_time","last_modify_time")
     search_fields = ["name","kmi_name", "title"]
     ordering = ("server","name",)
     list_filter = ("server",)
@@ -204,6 +204,14 @@ class AbstractWmsLayerAdmin(admin.ModelAdmin):
     _server.allow_tags = True
     _server.short_description = "WMS Server"
     _server.admin_order_field = "server"
+
+    def _legend(self,o):
+        if o.legend:
+            return "<a target='_blank' href='/api/legends/{}/{}/'>{}</a>".format(o.server.pk,o.name,o.legend)
+        else:
+            return ""
+    _legend.allow_tags = True
+    _legend.short_description = "Legend"
 
     def _workspace(self,o):
         return o.server.workspace
