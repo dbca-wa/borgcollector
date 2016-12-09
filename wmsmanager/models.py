@@ -189,6 +189,18 @@ class WmsServer(models.Model,ResourceStatusMixin,TransactionMixin):
                     bbox = "[{},{},{},{}]".format(boundingbox_element.get("minx",None),boundingbox_element.get("miny",None),boundingbox_element.get("maxx",None),boundingbox_element.get("maxy",None))
                     crsPosition = tmpcrsPosition
 
+            if not crs:
+                srs_iter = layer.iterfind("SRS")
+                for srs_element in srs_iter:
+                    tmpcrs = srs_element.text
+                    tmpcrsPosition = self.getCrsPriority(tmpcrs)
+                    if tmpcrsPosition == 0:
+                        crs = tmpcrs
+                        break
+                    elif not crs or crsPosition > tmpcrsPosition:
+                        crs = tmpcrs
+                        crsPosition = tmpcrsPosition
+
             try:
                 existed_layer = WmsLayer.objects.get(server = self,name=layer_name)
             except ObjectDoesNotExist:
