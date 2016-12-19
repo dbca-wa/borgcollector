@@ -33,7 +33,7 @@ from borg_utils.hg_batch_push import try_set_push_owner, try_clear_push_owner, i
 
 logger = logging.getLogger(__name__)
 
-slug_re = re.compile(r'^[a-zA-Z_][a-zA-Z0-9_]+$')
+slug_re = re.compile(r'^[a-zA-Z0-9_\-]+$')
 validate_slug = RegexValidator(slug_re, "Slug can only start with letters or underscore, and contain letters, numbers and underscore", "invalid")
 
 getcapabilities_ns = {"xlink":"http://www.w3.org/1999/xlink"}
