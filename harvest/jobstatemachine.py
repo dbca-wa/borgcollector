@@ -341,9 +341,14 @@ class JobStatemachine(object):
                     log = last_log
 
             if current_state != next_state:
-                if (not current_state.is_error_state) and (not next_state.is_error_state):
-                    #move to next state, change the previous state
-                    job.previous_state = job.state
+                #move to next state, change the previous state
+                if current_state.is_error_state:
+                    if not next_state.is_error_state and next_state != current_state._normal_state():
+                        job.previous_state = current_state._normal_state._name
+                elif not next_state.is_error_state:
+                    job.previous_state = current_state.name
+                elif next_state._normal_state() != current_state:
+                    job.previous_state = current_state.name
                 #job move to a new state, change the job state
                 job.state = next_state.name
             else:
