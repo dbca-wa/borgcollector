@@ -481,7 +481,7 @@ class DumpFullData(HarvestState):
         """
         self.database = settings.DATABASES["default"]
         self.env = os.environ.copy()
-        self.dump_cmd = ["pg_dump", "-h", self.database["HOST"], "-d", self.database["NAME"], "-U", self.database["USER"], "-b", "-E", "utf-8", "-F", "t", "-w", "-O"]
+        self.dump_cmd = ["pg_dump", "-h", self.database["HOST"], "-d", self.database["NAME"], "-U", self.database["USER"], "-b", "-E", "utf-8", "-F", "c","-Z","1", "-w", "-O"]
         if 'PASSWORD' in self.database and  self.database['PASSWORD'].strip():
             self.env["PGPASSWORD"] = self.database["PASSWORD"]
         if self.database["PORT"]:
@@ -509,7 +509,7 @@ class DumpFullData(HarvestState):
             #dump dir does not exist, create it
             os.makedirs(job.dump_dir)
 
-        file_name = job.publish.table_name + ".tar"
+        file_name = job.publish.table_name + ".db"
         dump_file = os.path.join(job.dump_dir,file_name)
         cmd = self.dump_cmd + ["-t", job.publish.workspace.publish_data_schema + "." + job.publish.table_name, "-f", dump_file]
 
