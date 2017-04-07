@@ -787,7 +787,7 @@ class PublishAdmin(VersionAdmin,JobFields):
         try:
             for publish in queryset:
                 try:
-                    publish.remove_publish_from_repository()
+                    publish.unpublish()
                     if publish.status != ResourceStatus.Disabled.name:
                         publish.status = ResourceStatus.Disabled.name
                         publish.pending_actions = None
