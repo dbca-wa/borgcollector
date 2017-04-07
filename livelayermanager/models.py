@@ -2,6 +2,7 @@ from __future__ import unicode_literals
 import re
 import json
 import logging
+import shutil
 import os
 import hglib
 from datetime import datetime
@@ -168,7 +169,7 @@ class Datasource(BorgModel,ResourceStatusMixin,TransactionMixin):
 
 
     def json_filename(self,action='publish'):
-        if action == 'publish':
+        if action in ['publish','unpublish']:
             return os.path.join(self.workspace.publish_channel.name,"live_stores", "{}.{}.json".format(self.workspace.name, self.name))
         else:
             return os.path.join(self.workspace.publish_channel.name,"live_stores", "{}.{}.{}.json".format(self.workspace.name, self.name,action))
@@ -177,30 +178,45 @@ class Datasource(BorgModel,ResourceStatusMixin,TransactionMixin):
         return os.path.join(BorgConfiguration.BORG_STATE_REPOSITORY, self.json_filename(action))
 
     def unpublish(self):
-        """
-         remove store's json reference (if exists) from the repository,
-         return True if store is removed for repository; return false, if layers does not existed in repository.
-        """
-        json_files = [ self.json_filename_abs(action) for action in [ 'publish' ] ]
-        #get all existing files.
-        json_files = [ f for f in json_files if os.path.exists(f) ]
-        if json_files:
-            #file exists, layers is published, remove it.
-            try_set_push_owner("liveserver")
-            hg = None
-            try:
-                hg = hglib.open(BorgConfiguration.BORG_STATE_REPOSITORY)
-                hg.remove(files=json_files)
-                hg.commit(include=json_files,addremove=True, user="borgcollector", message="Remove live store {}.{}".format(self.workspace.name, self.name))
-                increase_committed_changes()
+        try_set_push_owner("liveserver")
+        hg = None
+        try:
+            meta_data = {}
+            meta_data["name"] = self.name
+            meta_data["schema"] = self.schema
+            meta_data["workspace"] = self.workspace.name
+        
+            #write meta data file
+            file_name = "{}.meta.json".format(self.name)
+            meta_file = os.path.join(BorgConfiguration.UNPUBLISH_DIR,self.workspace.publish_channel.name,self.workspace.name,"stores",file_name)
+            #create the dir if required
+            if not os.path.exists(os.path.dirname(meta_file)):
+                os.makedirs(os.path.dirname(meta_file))
+
+            with open(meta_file,"wb") as output:
+                json.dump(meta_data, output, indent=4)
+
+            json_out = {}
+            json_out['meta'] = {"file":"{}{}".format(BorgConfiguration.MASTER_PATH_PREFIX, meta_file),"md5":file_md5(meta_file)}
+            json_out['action'] = 'remove'
+            json_out["remove_time"] = timezone.localtime(timezone.now()).strftime("%Y-%m-%d %H:%M:%S.%f")
+        
+            json_filename = self.json_filename_abs('unpublish');
+            #create the dir if required
+            if not os.path.exists(os.path.dirname(json_filename)):
+                os.makedirs(os.path.dirname(json_filename))
+
+            with open(json_filename, "wb") as output:
+                json.dump(json_out, output, indent=4)
+        
+            hg = hglib.open(BorgConfiguration.BORG_STATE_REPOSITORY)
+            hg.commit(include=[json_filename],addremove=True, user="borgcollector", message="Unpublish live store {}.{}".format(self.workspace.name, self.name))
+            increase_committed_changes()
                 
-                try_push_to_repository("liveserver",hg)
-            finally:
-                if hg: hg.close()
-                try_clear_push_owner("liveserver")
-            return True
-        else:
-            return False
+            try_push_to_repository("liveserver",hg)
+        finally:
+            if hg: hg.close()
+            try_clear_push_owner("liveserver")
 
     def publish(self):
         """
@@ -436,7 +452,7 @@ class Layer(BorgModel,ResourceStatusMixin,TransactionMixin):
             self.try_clear_transaction("livelayer_delete")
 
     def json_filename(self,action='publish'):
-        if action == 'publish':
+        if action in ['publish','unpublish']:
             return os.path.join(self.datasource.workspace.publish_channel.name,"live_layers", "{}.{}.json".format(self.datasource.workspace.name, self.kmi_name))
         else:
             return os.path.join(self.datasource.workspace.publish_channel.name,"live_layers", "{}.{}.{}.json".format(self.datasource.workspace.name, self.kmi_name,action))
@@ -445,35 +461,64 @@ class Layer(BorgModel,ResourceStatusMixin,TransactionMixin):
         return os.path.join(BorgConfiguration.BORG_STATE_REPOSITORY, self.json_filename(action))
 
     def unpublish(self):
-        """
-         remove store's json reference (if exists) from the repository,
-         return True if store is removed for repository; return false, if layers does not existed in repository.
-        """
+        #use published meta file as the meta file for unpublish
+        json_file = self.json_filename_abs('publish')
+        if not os.path.exists(json_file):
+            raise Exception("Can't find the publish json file({}) in repository.".format(self.json_filename('publish')))
+
+        json_out = None
+        with open(json_file,"r") as f:
+            json_out = json.loads(f.read())
+
+        if "meta" not in json_out or "file" not in json_out["meta"]:
+            raise Exception("Can't find meta file in the publish json file({})".format(self.json_filename('publish')))
+
+        published_meta_file = json_out["meta"]["file"][len(BorgConfiguration.MASTER_PATH_PREFIX):]
+        if not os.path.exists(published_meta_file):
+            raise Exception("Published meta file({}) is missing.".format(published_meta_file))
+
+        file_name = "{}.meta.json".format(self.kmi_name)
+        meta_file = os.path.join(BorgConfiguration.UNPUBLISH_DIR,self.datasource.workspace.publish_channel.name,self.datasource.workspace.name,"layers",file_name)
+
+        if not os.path.exists(os.path.dirname(meta_file)):
+            os.makedirs(os.path.dirname(meta_file))
+
+        shutil.copyfile(published_meta_file,meta_file)
+
+        #remove it from catalogue service
         #remove it from catalogue service
         res = requests.delete("{}/catalogue/api/records/{}:{}/".format(settings.CSW_URL,self.datasource.workspace.name,self.kmi_name),auth=(settings.CSW_USER,settings.CSW_PASSWORD))
         if res.status_code != 404:
             res.raise_for_status()
 
-        json_files = [ self.json_filename_abs(action) for action in [ 'publish','empty_gwc' ] ]
-        #get all existing files.
-        json_files = [ f for f in json_files if os.path.exists(f) ]
-        if json_files:
-            #file exists, layers is published, remove it.
-            try_set_push_owner("livelayer")
-            hg = None
-            try:
-                hg = hglib.open(BorgConfiguration.BORG_STATE_REPOSITORY)
+        json_filename = self.json_filename_abs('unpublish');
+        try_set_push_owner("livelayer")
+        hg = None
+        try:
+            json_out['meta'] = {"file":"{}{}".format(BorgConfiguration.MASTER_PATH_PREFIX, meta_file),"md5":file_md5(meta_file)}
+            json_out['action'] = "remove"
+            json_out["remove_time"] = timezone.localtime(timezone.now()).strftime("%Y-%m-%d %H:%M:%S.%f")
+        
+            with open(json_filename, "wb") as output:
+                json.dump(json_out, output, indent=4)
+        
+            hg = hglib.open(BorgConfiguration.BORG_STATE_REPOSITORY)
+
+            #remove other related json files
+            json_files = [ self.json_filename_abs(action) for action in [ 'empty_gwc' ] ]
+            #get all existing files.
+            json_files = [ f for f in json_files if os.path.exists(f) ]
+            if json_files:
                 hg.remove(files=json_files)
-                hg.commit(include=json_files,addremove=True, user="borgcollector", message="Remove live layer {}.{}".format(self.datasource.workspace.name, self.kmi_name))
-                increase_committed_changes()
+
+            json_files.append(json_filename)
+            hg.commit(include=json_files,addremove=True, user="borgcollector", message="unpublish live layer {}.{}".format(self.datasource.workspace.name, self.kmi_name))
+            increase_committed_changes()
                 
-                try_push_to_repository("livelayer",hg)
-            finally:
-                if hg: hg.close()
-                try_clear_push_owner("livelayer")
-            return True
-        else:
-            return False
+            try_push_to_repository("livelayer",hg)
+        finally:
+            if hg: hg.close()
+            try_clear_push_owner("livelayer")
 
     def publish(self):
         """

@@ -25,6 +25,7 @@ from borg_utils.resource_status import ResourceStatus,ResourceStatusMixin,Resour
 from borg_utils.transaction import TransactionMixin
 from borg_utils.signals import refresh_select_choices
 from borg_utils.hg_batch_push import try_set_push_owner, try_clear_push_owner, increase_committed_changes, try_push_to_repository
+from borg_utils.utils import file_md5
 
 logger = logging.getLogger(__name__)
 
@@ -186,7 +187,7 @@ class LayerGroup(models.Model,ResourceStatusMixin,TransactionMixin):
         return (included_publishs,included_layers,included_groups)
         
     def json_filename(self,action='publish'):
-        if action == 'publish':
+        if action in ['publish','unpublish']:
             return os.path.join(self.workspace.publish_channel.name,"layergroups", "{}.{}.json".format(self.workspace.name, self.name))
         else:
             return os.path.join(self.workspace.publish_channel.name,"layergroups", "{}.{}.{}.json".format(self.workspace.name, self.name,action))
@@ -256,26 +257,62 @@ class LayerGroup(models.Model,ResourceStatusMixin,TransactionMixin):
         if res.status_code != 404:
             res.raise_for_status()
 
-        json_files = [ self.json_filename_abs(action) for action in [ 'publish','empty_gwc' ] ]
-        #get all existing files.
-        json_files = [ f for f in json_files if os.path.exists(f) ]
-        if json_files:
-            #file exists, layers is published, remove it.
-            try_set_push_owner("layergroup")
-            hg = None
-            try:
-                hg = hglib.open(BorgConfiguration.BORG_STATE_REPOSITORY)
+        json_filename = self.json_filename_abs('unpublish');
+
+        try_set_push_owner("layergroup")
+        hg = None
+        try:
+            meta_data = {}
+            #add extra data to meta data
+            meta_data["workspace"] = self.workspace.name
+            meta_data["name"] = self.name
+            meta_data["native_name"] = self.name
+            meta_data["auth_level"] = self.workspace.auth_level
+            meta_data["spatial_data"] = True
+
+            meta_data["channel"] = self.workspace.publish_channel.name
+            meta_data["sync_geoserver_data"] = self.workspace.publish_channel.sync_geoserver_data
+
+            #write meta data file
+            file_name = "{}.meta.json".format(self.name)
+            meta_file = os.path.join(BorgConfiguration.UNPUBLISH_DIR,self.workspace.publish_channel.name,self.workspace.name,"layergroups",file_name)
+            #create the dir if required
+            if not os.path.exists(os.path.dirname(meta_file)):
+                os.makedirs(os.path.dirname(meta_file))
+
+            with open(meta_file,"wb") as output:
+                json.dump(meta_data, output, indent=4)
+
+            json_out = {}
+            json_out['meta'] = {"file":"{}{}".format(BorgConfiguration.MASTER_PATH_PREFIX, meta_file),"md5":file_md5(meta_file)}
+            json_out['action'] = "remove"
+            json_out["remove_time"] = timezone.localtime(timezone.now()).strftime("%Y-%m-%d %H:%M:%S.%f")
+        
+            #create the dir if required
+            if not os.path.exists(os.path.dirname(json_filename)):
+                os.makedirs(os.path.dirname(json_filename))
+
+            with open(json_filename, "wb") as output:
+                json.dump(json_out, output, indent=4)
+        
+            hg = hglib.open(BorgConfiguration.BORG_STATE_REPOSITORY)
+
+            #remove other related json files
+            json_files = [ self.json_filename_abs(action) for action in [ 'empty_gwc' ] ]
+            #get all existing files.
+            json_files = [ f for f in json_files if os.path.exists(f) ]
+            if json_files:
                 hg.remove(files=json_files)
-                hg.commit(include=json_files,addremove=True, user="borgcollector", message="Remove layer group {}.{}".format(self.workspace.name, self.name))
-                increase_committed_changes()
+
+            json_files.append(json_filename)
+            hg.commit(include=json_files, user="borgcollector",addremove=True, message="Unpublish layer group {}.{}".format(self.workspace.name, self.name))
+            increase_committed_changes()
                 
-                try_push_to_repository("layergroup",hg)
-            finally:
-                if hg: hg.close()
-                try_clear_push_owner("layergroup")
-            return True
-        else:
-            return False
+            try_push_to_repository("layergroup",hg)
+        finally:
+            if hg: hg.close()
+            try_clear_push_owner("layergroup")
+
 
     def publish(self):
         """
