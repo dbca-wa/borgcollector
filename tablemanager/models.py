@@ -8,6 +8,7 @@ import logging
 import tempfile
 import subprocess
 import threading
+import shutil
 import time
 import signal
 import json
@@ -2216,7 +2217,7 @@ class Publish(Transform,ResourceStatusMixin,SpatialTableMixin):
                 if (not self.publish_status.publish_enabled) and (orig.publish_status.publish_enabled):
                     #from publish enabled to publish disabled.
                     try:
-                        self.remove_publish_from_repository()
+                        self.unpublish()
                     except:
                         error = sys.exc_info()
                         raise ValidationError(traceback.format_exception_only(error[0],error[1]))
@@ -2229,38 +2230,79 @@ class Publish(Transform,ResourceStatusMixin,SpatialTableMixin):
         except Exception as e:
             raise ValidationError(e)
 
-    def remove_publish_from_repository(self):
+    def unpublish(self):
         """
-         remove layer's json reference (if exists) from the state repository,
-         so that slave nodes will remove the layer/table from their index
-         return True if layres is removed for repository; return false, if layers does not existed in repository.
+        sometimes, failed to remove the json file from repository to trigger the unpublish action if the slave side has some uncommitted transaction.
+        for example:
+            1. slave A is failed to commit the tranaction 
+            2. User publish a layer 'test' by adding 'test.json' to repository
+            3. Adding file 'test.json' trigger a  publish action to publish 'test' layer in slave A
+            4. User unpublish the layer 'test' by removing 'test.json' to repository
+            5. Slave a can't oberseve the removing action, because 'test.json' was added and removed after the last committed time, so slave A can't unpublish the layer 
+        the solution is update the existing file instead of removing it.
         """
+        #use published meta file as the meta file for unpublish
+        json_file = self.output_filename_abs('publish')
+        if not os.path.exists(json_file):
+            raise Exception("Can't find the publish json file({}) in repository.".format(self.output_filename('publish')))
+
+        json_out = None
+        with open(json_file,"r") as f:
+            json_out = json.loads(f.read())
+
+        if "meta" not in json_out or "file" not in json_out["meta"]:
+            raise Exception("Can't find meta file in the publish json file({})".format(self.output_filename('publish')))
+
+        published_meta_file = json_out["meta"]["file"][len(BorgConfiguration.MASTER_PATH_PREFIX):]
+        if not os.path.exists(published_meta_file):
+            raise Exception("Published meta file({}) is missing.".format(published_meta_file))
+
+        if self.workspace.workspace_as_schema:
+            meta_file_folder = os.path.join(BorgConfiguration.UNPUBLISH_DIR,self.workspace.publish_channel.name,self.workspace.name,"layers")
+        else:
+            meta_file_folder = os.path.join(BorgConfiguration.UNPUBLISH_DIR,self.workspace.publish_channel.name,"layers")
+
+        #write meta data file
+        file_name = "{}.meta.json".format(self.table_name)
+        meta_file = os.path.join(meta_file_folder,file_name)
+
+        if not os.path.exists(os.path.dirname(meta_file)):
+            os.makedirs(os.path.dirname(meta_file))
+
+        shutil.copyfile(published_meta_file,meta_file)
+
         #remove it from catalogue service
         res = requests.delete("{}/catalogue/api/records/{}:{}/".format(settings.CSW_URL,self.workspace.name,self.table_name),auth=(settings.CSW_USER,settings.CSW_PASSWORD))
         if res.status_code != 404:
             res.raise_for_status()
 
-        #get all possible files
-        files =[self.output_filename_abs(action) for action in ['publish','meta','empty_gwc'] ]
-        #get all existing files.
-        files =[ f for f in files if os.path.exists(f)]
-        if files:
-            #file exists, layers is published, remove it.
-            try_set_push_owner("remove_publish")
-            hg = None
-            try:
-                hg = hglib.open(BorgConfiguration.BORG_STATE_REPOSITORY)
-                hg.remove(files=files)
-                hg.commit(include=files,addremove=True, user="borgcollector", message="Removed {}.{}".format(self.workspace.name, self.name))
-                increase_committed_changes()
+        json_out["action"] = 'remove'
+        json_out["remove_time"] = timezone.localtime(timezone.now()).strftime("%Y-%m-%d %H:%M:%S.%f")
+        json_out['meta'] = {"file":"{}{}".format(BorgConfiguration.MASTER_PATH_PREFIX, meta_file),"md5":file_md5(meta_file)}
 
-                try_push_to_repository("remove_publish",hg)
-            finally:
-                if hg: hg.close()
-                try_clear_push_owner("remove_publish")
-            return True
-        else:
-            return False
+
+        with open(json_file, "wb") as output:
+            json.dump(json_out, output, indent=4)
+
+        try_set_push_owner("unpublish")
+        hg = None
+        try:
+            hg = hglib.open(BorgConfiguration.BORG_STATE_REPOSITORY)
+
+            #get all possible files
+            files =[self.output_filename_abs(action) for action in ['meta','empty_gwc'] ]
+            #get all existing files.
+            files =[ f for f in files if os.path.exists(f)]
+            if files:
+                hg.remove(files=files)
+            files.append(json_file)
+            hg.commit(include=files,addremove=True, user=BorgConfiguration.BORG_STATE_USER, message="Removed {}.{}".format(self.workspace.name, self.name))
+            increase_committed_changes()
+
+            try_push_to_repository("unpublish",hg)
+        finally:
+            if hg: hg.close()
+            try_clear_push_owner("unpublish")
 
     @switch_searchpath(searchpath=BorgConfiguration.BORG_SCHEMA)
     def _post_execute(self,cursor):
@@ -2392,7 +2434,7 @@ class Publish(Transform,ResourceStatusMixin,SpatialTableMixin):
         return self.input_table.kmi_abstract if self.input_table else ""
 
     def output_filename(self,action='publish'):
-        if action == 'publish':
+        if action in ['publish','unpublish']:
             return os.path.join(self.workspace.publish_channel.name,"layers", "{}.{}.json".format(self.workspace.name, self.name))
         else:
             return os.path.join(self.workspace.publish_channel.name,"layers", "{}.{}.{}.json".format(self.workspace.name, self.name,action))
@@ -2517,6 +2559,7 @@ class Publish(Transform,ResourceStatusMixin,SpatialTableMixin):
                 if style_dump_dir:
                     #write the style into file system
                     style_file = os.path.join(style_dump_dir,"{}.{}.sld".format(self.table_name,style["name"]))
+                    print "{}".format(style)
                     with open(style_file,"wb") as f:
                         f.write(style["raw_content"].decode("base64"))
                     if md5:
@@ -2635,7 +2678,7 @@ class PublishEventListener(object):
         instance.drop(cursor, BorgConfiguration.TRANSFORM_SCHEMA,instance.workspace.schema)
         instance.drop(cursor, BorgConfiguration.TEST_TRANSFORM_SCHEMA,instance.workspace.test_schema)
 
-        instance.remove_publish_from_repository()
+        instance.unpublish()
 
     @staticmethod
     @receiver(post_delete, sender=Publish)

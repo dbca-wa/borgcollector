@@ -288,7 +288,7 @@ class WmsServer(models.Model,ResourceStatusMixin,TransactionMixin):
             self.try_clear_transaction("wmsserver_delete")
 
     def json_filename(self,action='publish'):
-        if action == 'publish':
+        if action in ['publish','unpublish']:
             return os.path.join(self.workspace.publish_channel.name,"wms_stores", "{}.{}.json".format(self.workspace.name, self.name))
         else:
             return os.path.join(self.workspace.publish_channel.name,"wms_stores", "{}.{}.{}.json".format(self.workspace.name, self.name,action))
@@ -297,30 +297,44 @@ class WmsServer(models.Model,ResourceStatusMixin,TransactionMixin):
         return os.path.join(BorgConfiguration.BORG_STATE_REPOSITORY, self.json_filename(action))
 
     def unpublish(self):
-        """
-         remove store's json reference (if exists) from the repository,
-         return True if store is removed for repository; return false, if layers does not existed in repository.
-        """
-        json_files = [ self.json_filename_abs(action) for action in [ 'publish' ] ]
-        #get all existing files.
-        json_files = [ f for f in json_files if os.path.exists(f) ]
-        if json_files:
-            #file exists, layers is published, remove it.
-            try_set_push_owner("wmsserver")
-            hg = None
-            try:
-                hg = hglib.open(BorgConfiguration.BORG_STATE_REPOSITORY)
-                hg.remove(files=json_files)
-                hg.commit(include=json_files,addremove=True, user="borgcollector", message="Remove wms store {}.{}".format(self.workspace.name, self.name))
-                increase_committed_changes()
+        try_set_push_owner("wmsserver")
+        hg = None
+        try:
+            meta_data = {}
+            meta_data["name"] = self.name
+            meta_data["workspace"] = self.workspace.name
+        
+            #write meta data file
+            file_name = "{}.meta.json".format(self.name)
+            meta_file = os.path.join(BorgConfiguration.UNPUBLISH_DIR,self.workspace.publish_channel.name,self.workspace.name,"stores",file_name)
+            #create the dir if required
+            if not os.path.exists(os.path.dirname(meta_file)):
+                os.makedirs(os.path.dirname(meta_file))
+
+            with open(meta_file,"wb") as output:
+                json.dump(meta_data, output, indent=4)
+
+            json_out = {}
+            json_out['meta'] = {"file":"{}{}".format(BorgConfiguration.MASTER_PATH_PREFIX, meta_file),"md5":file_md5(meta_file)}
+            json_out['action'] = 'remove'
+            json_out["remove_time"] = timezone.localtime(timezone.now()).strftime("%Y-%m-%d %H:%M:%S.%f")
+        
+            json_filename = self.json_filename_abs('unpublish');
+            #create the dir if required
+            if not os.path.exists(os.path.dirname(json_filename)):
+                os.makedirs(os.path.dirname(json_filename))
+
+            with open(json_filename, "wb") as output:
+                json.dump(json_out, output, indent=4)
+        
+            hg = hglib.open(BorgConfiguration.BORG_STATE_REPOSITORY)
+            hg.commit(include=[json_filename],addremove=True, user="borgcollector", message="Unpublish wms store {}.{}".format(self.workspace.name, self.name))
+            increase_committed_changes()
                 
-                try_push_to_repository("wmsserver",hg)
-            finally:
-                if hg: hg.close()
-                try_clear_push_owner("wmsserver")
-            return True
-        else:
-            return False
+            try_push_to_repository("wmsserver",hg)
+        finally:
+            if hg: hg.close()
+            try_clear_push_owner("wmsserver")
 
     def publish(self):
         """
@@ -521,7 +535,7 @@ class WmsLayer(models.Model,ResourceStatusMixin,TransactionMixin):
             self.try_clear_transaction("wmslayer_delete")
 
     def json_filename(self,action='publish'):
-        if action == 'publish':
+        if action in ['publish','unpublish']:
             return os.path.join(self.server.workspace.publish_channel.name,"wms_layers", "{}.{}.json".format(self.server.workspace.name, self.name))
         else:
             return os.path.join(self.server.workspace.publish_channel.name,"wms_layers", "{}.{}.{}.json".format(self.server.workspace.name, self.name,action))
@@ -530,35 +544,66 @@ class WmsLayer(models.Model,ResourceStatusMixin,TransactionMixin):
         return os.path.join(BorgConfiguration.BORG_STATE_REPOSITORY, self.json_filename(action))
 
     def unpublish(self):
-        """
-         remove store's json reference (if exists) from the repository,
-         return True if store is removed for repository; return false, if layers does not existed in repository.
-        """
         #remove it from catalogue service
         res = requests.delete("{}/catalogue/api/records/{}:{}/".format(settings.CSW_URL,self.server.workspace.name,self.kmi_name),auth=(settings.CSW_USER,settings.CSW_PASSWORD))
         if res.status_code != 404:
             res.raise_for_status()
 
-        json_files = [ self.json_filename_abs(action) for action in [ 'publish','empty_gwc' ] ]
-        #get all existing files.
-        json_files = [ f for f in json_files if os.path.exists(f) ]
-        if json_files:
-            #file exists, layers is published, remove it.
-            try_set_push_owner("wmslayer")
-            hg = None
-            try:
-                hg = hglib.open(BorgConfiguration.BORG_STATE_REPOSITORY)
+        json_filename = self.json_filename_abs('unpublish');
+        try_set_push_owner("wmslayer")
+        hg = None
+        try:
+            meta_data = {}
+            #add extra data to meta data
+            meta_data["workspace"] = self.server.workspace.name
+            meta_data["name"] = self.kmi_name
+            meta_data["native_name"] = self.name
+            meta_data["store"] = self.server.name
+            meta_data["auth_level"] = self.server.workspace.auth_level
+            meta_data["spatial_data"] = True
+
+            meta_data["channel"] = self.server.workspace.publish_channel.name
+            meta_data["sync_geoserver_data"] = self.server.workspace.publish_channel.sync_geoserver_data
+
+            #write meta data file
+            file_name = "{}.meta.json".format(self.kmi_name)
+            meta_file = os.path.join(BorgConfiguration.UNPUBLISH_DIR,self.server.workspace.publish_channel.name,self.server.workspace.name,"layers",file_name)
+            #create the dir if required
+            if not os.path.exists(os.path.dirname(meta_file)):
+                os.makedirs(os.path.dirname(meta_file))
+
+            with open(meta_file,"wb") as output:
+                json.dump(meta_data, output, indent=4)
+
+            json_out = {}
+            json_out['meta'] = {"file":"{}{}".format(BorgConfiguration.MASTER_PATH_PREFIX, meta_file),"md5":file_md5(meta_file)}
+            json_out['action'] = "remove"
+            json_out["remove_time"] = timezone.localtime(timezone.now()).strftime("%Y-%m-%d %H:%M:%S.%f")
+        
+            #create the dir if required
+            if not os.path.exists(os.path.dirname(json_filename)):
+                os.makedirs(os.path.dirname(json_filename))
+
+            with open(json_filename, "wb") as output:
+                json.dump(json_out, output, indent=4)
+        
+            hg = hglib.open(BorgConfiguration.BORG_STATE_REPOSITORY)
+
+            #remove other related json files
+            json_files = [ self.json_filename_abs(action) for action in [ 'empty_gwc' ] ]
+            #get all existing files.
+            json_files = [ f for f in json_files if os.path.exists(f) ]
+            if json_files:
                 hg.remove(files=json_files)
-                hg.commit(include=json_files,addremove=True, user="borgcollector", message="Remove wms layer {}.{}".format(self.server.workspace.name, self.name))
-                increase_committed_changes()
+
+            json_files.append(json_filename)
+            hg.commit(include=json_files,addremove=True, user="borgcollector", message="unpublish wms layer {}.{}".format(self.server.workspace.name, self.name))
+            increase_committed_changes()
                 
-                try_push_to_repository("wmslayer",hg)
-            finally:
-                if hg: hg.close()
-                try_clear_push_owner("wmslayer")
-            return True
-        else:
-            return False
+            try_push_to_repository("wmslayer",hg)
+        finally:
+            if hg: hg.close()
+            try_clear_push_owner("wmslayer")
 
     def publish(self):
         """
