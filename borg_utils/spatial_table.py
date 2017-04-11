@@ -24,7 +24,7 @@ class SpatialTable(object):
     _drop_index_sql = "DROP INDEX IF EXISTS \"{0}\".\"{1}\""
 
     _retrieve_bbox_sql = "SELECT public.ST_XMIN(a.bbox), public.ST_YMIN(a.bbox), public.ST_XMAX(a.bbox), public.ST_YMAX(a.bbox) FROM (SELECT public.st_extent(\"{2}\") AS bbox  FROM \"{0}\".\"{1}\") a"
-    _retrieve_crs_sql = "SELECT public.ST_SRID({2}) FROM \"{0}\".\"{1}\" LIMIT 1;"
+    _retrieve_crs_sql = "SELECT FIND_SRID('{0}','{1}','{2}');"
 
     _cache = dict()
 
@@ -128,6 +128,8 @@ class SpatialTable(object):
                 row = self._dbUtil.get(SpatialTable._retrieve_bbox_sql.format(self._schema,self._table,column[0]))
                 if any(row):
                     column[2] =  (row[0],row[1],row[2],row[3])
+                else:
+                    column[2] =  (108,-45,155,-10)
                 
         if self._geography_columns:
             row = None
@@ -135,6 +137,8 @@ class SpatialTable(object):
                 row = self._dbUtil.get(SpatialTable._retrieve_bbox_sql.format(self._schema,self._table,column[0]))
                 if row[0]:
                     column[2] =  (row[0],row[1],row[2],row[3])
+                else:
+                    column[2] =  (108,-45,155,-10)
                 
         self._bbox = True
 
