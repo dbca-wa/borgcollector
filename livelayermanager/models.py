@@ -285,6 +285,7 @@ class Layer(BorgModel,ResourceStatusMixin,TransactionMixin):
     sql = models.TextField(null=True, editable=False)
     crs = models.CharField(max_length=64,editable=False,null=True,blank=True)
     bbox = models.CharField(max_length=128,null=True,editable=False)
+    kmi_bbox = models.CharField(max_length=128,null=True,blank=True,editable=True)
     name = models.CharField(max_length=256,null=True,editable=True,blank=True,unique=True)
     geoserver_setting = models.TextField(blank=True,null=True,editable=False)
     status = models.CharField(max_length=32, null=False, editable=False,choices=ResourceStatus.layer_status_options)
@@ -349,7 +350,7 @@ class Layer(BorgModel,ResourceStatusMixin,TransactionMixin):
         meta_data["modified"] = (self.last_modify_time or self.last_refresh_time).astimezone(timezone.get_default_timezone()).strftime("%Y-%m-%d %H:%M:%S.%f")
 
         #bbox
-        meta_data["bounding_box"] = self.bbox or None
+        meta_data["bounding_box"] = self.kmi_bbox or self.bbox or None
         meta_data["crs"] = self.crs or None
 
         #ows resource
@@ -408,6 +409,7 @@ class Layer(BorgModel,ResourceStatusMixin,TransactionMixin):
 
         #add extra data to meta data
         meta_data["workspace"] = self.datasource.workspace.name
+        meta_data["override_bbox"] = True if self.kmi_bbox else False
         meta_data["schema"] = self.datasource.schema
         meta_data["name"] = self.kmi_name
         meta_data["table"] = self.table
