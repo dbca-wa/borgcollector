@@ -1,7 +1,7 @@
 from django import forms
 
 from tablemanager.models import Workspace
-from livelayermanager.models import Datasource,Layer
+from livelayermanager.models import Datasource,Layer,SqlViewLayer
 from borg_utils.form_fields import GeoserverSettingForm,MetaTilingFactorField,GridSetField
 from borg_utils.form_fields import GroupedModelChoiceField,BorgSelect
 from borg_utils.forms import BorgModelForm
@@ -85,5 +85,39 @@ class LayerForm(BorgModelForm,GeoserverSettingForm):
 
     class Meta:
         model = Layer
+        fields = "__all__"
+
+class SqlViewLayerForm(BorgModelForm,GeoserverSettingForm):
+    """
+    A form for SqlViewLayer model
+    """
+    create_cache_layer = forms.BooleanField(required=False,label="create_cache_layer",initial={"enabled":True})
+    create_cache_layer.setting_type = "geoserver_setting"
+
+    server_cache_expire = forms.IntegerField(label="server_cache_expire",min_value=0,required=False,initial=0,help_text="Expire server cache after n seconds (set to 0 to use source setting)")
+    server_cache_expire.setting_type = "geoserver_setting"
+
+    client_cache_expire = forms.IntegerField(label="client_cache_expire",min_value=0,required=False,initial=0,help_text="Expire client cache after n seconds (set to 0 to use source setting)")
+    client_cache_expire.setting_type = "geoserver_setting"
+
+    def __init__(self, *args, **kwargs):
+        kwargs['initial']=kwargs.get('initial',{})
+        self.get_setting_from_model(*args,**kwargs)
+
+        super(SqlViewLayerForm, self).__init__(*args, **kwargs)
+        instance = kwargs.get("instance")
+        if instance and instance.is_published:
+            self.fields['name'].widget.attrs['readonly'] = True
+
+    def _post_clean(self):
+        if self.errors:
+            return
+
+        self.set_setting_to_model()
+        super(SqlViewLayerForm,self)._post_clean()
+
+
+    class Meta:
+        model = SqlViewLayer
         fields = "__all__"
 

@@ -47,7 +47,7 @@ from borg_utils.resource_status import ResourceStatus,ResourceStatusMixin
 from borg_utils.db_util import defaultDbUtil
 from borg_utils.hg_batch_push import try_set_push_owner, try_clear_push_owner, increase_committed_changes, try_push_to_repository
 from borg_utils.signals import refresh_select_choices
-from borg_utils.models import BorgModel
+from borg_utils.models import BorgModel,SQLField
 from borg_utils.utils import file_md5
 
 logger = logging.getLogger(__name__)
@@ -156,13 +156,6 @@ class DatasourceField(models.TextField):
     def formfield(self, **kwargs):
         field = super(DatasourceField, self).formfield(**kwargs)
         field.widget = DatasourceWidget(mode="xml", theme="mdn-like",js_var_format="editor_%s")
-        return field
-
-
-class SQLField(models.TextField):
-    def formfield(self, **kwargs):
-        field = super(SQLField, self).formfield(**kwargs)
-        field.widget = CodeMirrorTextarea(mode="text/x-sql", theme="mdn-like")
         return field
 
 class JobFields(BorgModel):
