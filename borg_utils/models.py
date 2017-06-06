@@ -1,7 +1,14 @@
 import django.db.models
 from django.core.exceptions import ValidationError,NON_FIELD_ERRORS
+from codemirror import CodeMirrorTextarea
 
 # Create your models here.
+
+class SQLField(django.db.models.TextField):
+    def formfield(self, **kwargs):
+        field = super(SQLField, self).formfield(**kwargs)
+        field.widget = CodeMirrorTextarea(mode="text/x-sql", theme="mdn-like")
+        return field
 
 class BorgModel(django.db.models.Model):
     @property
@@ -11,9 +18,9 @@ class BorgModel(django.db.models.Model):
     @property
     def data_changed(self):
         if hasattr(self,"changed_fields"):
-            return getattr(self,"changed_fields")
+            return getattr(self,"changed_fields") and True or False
         else:
-            return True
+            return False
 
     def full_clean(self, exclude=None, validate_unique=True, form_cleaned=True):
         """
