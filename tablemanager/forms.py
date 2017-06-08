@@ -13,7 +13,6 @@ from borg_utils.form_fields import GroupedModelChoiceField,CachedModelChoiceFiel
 from borg_utils.widgets import MultiWidgetLayout
 from borg_utils.form_fields import GeoserverSettingForm,MetaTilingFactorField,GridSetField,BorgSelect
 from borg_utils.forms import BorgModelForm
-from borg_utils.spatial_table import SpatialTable
 from django.template import Context, Template
 
 class ForeignTableForm(BorgModelForm):
@@ -296,7 +295,7 @@ class PublishForm(BorgModelForm,GeoserverSettingForm):
                 pos += 1
                 normal_table_pos += 1
     
-        if self.instance and SpatialTable.check_spatial(self.instance.spatial_type):
+        if self.instance and self.instance.is_spatial:
             self.set_setting_to_model()
 
     class Meta:

@@ -20,6 +20,9 @@ WHERE np.nspname='{0}' and ct.relname='{1}'
 """
 
     _check_table_exist_sql = "SELECT count(1) FROM pg_catalog.pg_class a JOIN pg_catalog.pg_namespace b ON a.relnamespace = b.oid WHERE b.nspname = '{0}' AND a.relname = '{1}'"
+    _check_temp_table_exist_sql = "SELECT count(1) FROM pg_catalog.pg_class WHERE relname = '{0}' AND relpersistence='t'"
+
+    _get_temp_table_schema_sql = "SELECT b.nspname FROM pg_catalog.pg_class a JOIN pg_catalog.pg_namespace b ON a.relnamespace = b.oid WHERE a.relname = '{0}' AND a.relpersistence='t'"
 
     _query_all_tables = "select relname from pg_class c join pg_namespace n on c.relnamespace=n.oid where n.nspname='{schema}' and c.relkind = 'r'"
 
@@ -50,7 +53,7 @@ WHERE np.nspname='{0}' and ct.relname='{1}'
         if not self._env:
             self._env = os.environ.copy()
             if self._password:
-                self._env["PGPASSWORD"] = _database["PASSWORD"]
+                self._env["PGPASSWORD"] = self._password
 
             self._table_schema_dump_cmd = ["pg_dump", "-h", self._host, "-d", self._db, "-U", self._user, "-F", "p", "-w", "-x", "-O", "--no-security-labels", "--no-tablespaces", "-s"]
             if self._port:
@@ -96,6 +99,14 @@ WHERE np.nspname='{0}' and ct.relname='{1}'
                 cursor.close()
                 cursor = None
 
+    def get_temp_table_schema(table,cursor=None):
+        try:
+            result = self.get(self._get_temp_table_schema_sql.format(table),cursor)
+            return result[0] if result else None
+        except:
+            return None
+
+    
     def query(self,sql,cursor=None):
         close = False
         if not cursor:
@@ -112,6 +123,9 @@ WHERE np.nspname='{0}' and ct.relname='{1}'
             if close:
                 cursor.close()
                 cursor = None
+
+    def execute(self,sql,cursor=None):
+        self.update(sql,cursor)
 
     def update(self,sql,cursor=None):
         close = False
@@ -151,8 +165,11 @@ WHERE np.nspname='{0}' and ct.relname='{1}'
                 cursor.close()
 
 
-    def table_exists(self,table,schema="public"):
-        result = self.get(self._check_table_exist_sql.format(schema,table))
+    def table_exists(self,table,schema="public",cursor=None):
+        if schema == 'pg_temp':
+            result = self.get(self._check_temp_table_exist_sql.format(table),cursor)
+        else:
+            result = self.get(self._check_table_exist_sql.format(schema,table),cursor)
         return result[0] and True or False
 
     def exists(self,sql):

@@ -1,6 +1,16 @@
 from django.conf import settings
-
+import os
 from .db_util import defaultDbUtil
+import random
+import json
+import traceback
+import hashlib
+
+
+def hashcode(text):
+    m = hashlib.md5()
+    m.update(text)
+    return m.hexdigest()
 
 class SpatialTable(object):
     """
@@ -13,8 +23,6 @@ class SpatialTable(object):
         From bit2 to bit5 represents the spatial data type, currently support 'GEOMETRY','POINT','LINESTRING','POLYGON','MULTIPOINT','MULTILINESTRING','MULTIPOLYGON'
     """
 
-    _check_table_exist_sql = "SELECT count(1) FROM pg_catalog.pg_class a JOIN pg_catalog.pg_namespace b ON a.relnamespace = b.oid WHERE b.nspname = '{0}' AND a.relname = '{1}'"
-
     _get_geometry_columns_sql = "SELECT f_geometry_column,type  FROM public.geometry_columns WHERE f_table_catalog = '{0}' AND f_table_schema = '{1}' AND f_table_name = '{2}'"
     _get_geography_columns_sql = "SELECT f_geography_column,type  FROM public.geography_columns WHERE f_table_catalog = '{0}' AND f_table_schema = '{1}' AND f_table_name = '{2}'"
     _get_raster_columns_sql = "SELECT r_raster_column  FROM public.raster_columns WHERE r_table_catalog = '{0}' AND r_table_schema = '{1}' AND r_table_name = '{2}'"
@@ -24,188 +32,260 @@ class SpatialTable(object):
     _drop_index_sql = "DROP INDEX IF EXISTS \"{0}\".\"{1}\""
 
     _retrieve_bbox_sql = "SELECT public.ST_XMIN(a.bbox), public.ST_YMIN(a.bbox), public.ST_XMAX(a.bbox), public.ST_YMAX(a.bbox) FROM (SELECT public.st_extent(\"{2}\") AS bbox  FROM \"{0}\".\"{1}\") a"
-    _retrieve_crs_sql = "SELECT FIND_SRID('{0}','{1}','{2}');"
+    _retrieve_geometry_crs_sql = "SELECT srid FROM public.geometry_columns WHERE f_table_schema='{0}' AND f_table_name='{1}' AND f_geometry_column='{2}';"
+    _retrieve_geography_crs_sql = "SELECT srid FROM public.geography_columns WHERE f_table_schema='{0}' AND f_table_name='{1}' AND f_geography_column='{2}';"
 
-    _cache = dict()
-
-    _types = ['GEOMETRY','POINT','LINESTRING','POLYGON','MULTIPOINT','MULTILINESTRING','MULTIPOLYGON']
-
-    @staticmethod
-    def get_instance(schema,table,refresh=False,bbox=False,crs=False,dbUtil=None):
-        dbUtil = dbUtil or defaultDbUtil
-        o = None
-        if refresh:
-            o = SpatialTable(dbUtil,schema,table)
-            SpatialTable._cache[(dbUtil.id,schema,table)] = o
-        else:
-            try:
-                o = SpatialTable._cache[(dbUtil.id,schema,table)]
-            except:
-                o = SpatialTable(dbUtil,schema,table)
-                SpatialTable._cache[(schema,table)] = o
-
-        if bbox and not o._bbox:
-            o._retrieve_bbox()
-        if crs and not o._crs:
-            o._retrieve_crs()
-        return o
-
-    def __init__(self,dbUtil,schema,table):
+    def __init__(self,dbUtil,schema,table,sql=None,spatial_info=None,bbox=False,crs=False):
         self._dbUtil = dbUtil
-        self._geometry_columns = []
-        self._geography_columns = []
-        self._raster_columns = []
-        self._spatial_type = 0
-        self._spatial_type_desc = ""
         self._schema = schema
         self._table = table
-        self._bbox = False
-        self._crs = False
-        self._initialize()
+        self._sql = sql
+        self._bbox_retrieved = False
+        self._crs_retrieved = False
+        self._spatial_info = None
+        self._spatial_info_version = None
+        self._spatial_info_desc = None
+        self._parse(spatial_info)
+        if self._spatial_info is None:
+            self._spatial_info= [[],[],[]]
+            if self._schema is not None:
+                self._initialize(bbox,crs)
+
+
+    @property
+    def geometry_columns(self):
+        return self._spatial_info[0]
+
+    @property
+    def geography_columns(self):
+        return self._spatial_info[1]
+
+    @property
+    def raster_columns(self):
+        return self._spatial_info[2]
     
-    def reset(self):
-        """
-        Clear the cache and reload all information from database.
-        """
-        self.__init__()
+    
+    def refresh(self,bbox=False,crs=False):
+        self.__init__(self._dbUtil,self._schema,self._table,sql=self._sql,bbox=bbox,crs=crs)
+        self._spatial_info_version = None
+        return self
 
-    @staticmethod
-    def get_type_id(type_name):
+    def load(self,spatial_info):
+        self._parse(spatial_info)
+
+    def _parse(self,spatial_info):
+        if spatial_info is None or spatial_info == "": 
+            return
         try:
-            return SpatialTable._type_dict[type_name.upper()]           
+            #print "parse spatial info ({}) for table ({}.{})".format(spatial_info,self._schema,self._table)
+            info = json.loads(spatial_info)
+            if info is None or not isinstance(info,list) or len(info) != 3:
+                return
+
+            bbox_retrieved = False
+            crs_retrieved = False
+            for columns in info:
+                for column in columns:
+                    if column[2]:
+                        bbox_retrieved = True
+                    if column[3]:
+                        crs_retrieved = True
+                    if bbox_retrieved and crs_retrieved:
+                        break
+                if bbox_retrieved and crs_retrieved:
+                    break
+
+            self._spatial_info = info
+            self._bbox_retrieved = bbox_retrieved
+            self._crs_retrieved = crs_retrieved
+            self._spatial_info_version = hashcode(spatial_info)
+            self._spatial_info_desc = None
         except:
-            if hasattr(SpatialTable,"_type_dict"):
-                return 0
-            else:
-                type_id = 0
-                type_dict = {}
-                for t in SpatialTable._types:
-                    type_dict[t] = type_id
-                    type_id += 1
-                SpatialTable._type_dict = type_dict
-                return SpatialTable.get_type_id(type_name)
-                       
-    def _initialize(self):
+            pass
+
+
+    def _initialize(self,bbox=False,crs=False):
         #not exist, reload again
-        if self._dbUtil.table_exists(self._table,self._schema):
-            rows = self._dbUtil.query(SpatialTable._get_geometry_columns_sql.format(self._dbUtil.database,self._schema,self._table))
-            self._geometry_columns = [[x[0],x[1],None,None] for x in rows]
-            
-            rows = self._dbUtil.query(SpatialTable._get_geography_columns_sql.format(self._dbUtil.database,self._schema,self._table))
-            self._geography_columns = [[x[0],x[1],None,None] for x in rows]
-            
-            rows = self._dbUtil.query(SpatialTable._get_raster_columns_sql.format(self._dbUtil.database,self._schema,self._table))
-            self._raster_columns = [x[0] for x in rows]
+        try:
+            #print "Analysis the spatial info for table({}.{}). bbox={}, crs={}".format(self._schema,self._table,bbox,crs)
+            if self._sql:
+                if self._dbUtil.table_exists(self._schema,self._table):
+                    raise "The table/view({0}) already exists, plase choose another name.".foramt(self._table)
+                #create the temp view
+                self._dbUtil.execute("CREATE VIEW \"{0}\".\"{1}\" AS {2}".format(self._schema,self._table,self._sql))
+    
+            if self._dbUtil.table_exists(self._table,self._schema):
+                rows = self._dbUtil.query(SpatialTable._get_geometry_columns_sql.format(self._dbUtil.database,self._schema,self._table))
+                self._spatial_info[0] = [[x[0],x[1],None,None] for x in rows]
+                
+                rows = self._dbUtil.query(SpatialTable._get_geography_columns_sql.format(self._dbUtil.database,self._schema,self._table))
+                self._spatial_info[1] = [[x[0],x[1],None,None] for x in rows]
+                
+                rows = self._dbUtil.query(SpatialTable._get_raster_columns_sql.format(self._dbUtil.database,self._schema,self._table))
+                self._spatial_info[2] = [[x[0],None,None,None] for x in rows]
+    
+    
+    
+            if self._sql or bbox:
+                self._retrieve_bbox()
 
-            self._spatial_type = 0
-            
-            column_index = 0
-            if self._geometry_columns:
-                for column in self._geometry_columns:
-                    self._spatial_type += ((1 << 4) | SpatialTable.get_type_id(column[1])) << (column_index * 6)
-                    column_index += 1
-                    if column_index >= 5: break;
+            if self._sql or crs:
+                self._retrieve_crs()
+    
+            if self._sql:
+                self._create_sql = self._dbUtil.get_create_table_sql(self._table,self._schema)
 
-            if self._geography_columns and column_index < 5:
-                for column in self._geography_columns:
-                    self._spatial_type += ((2 << 4) | SpatialTable.get_type_id(column[1])) << (column_index * 6)
-                    column_index += 1
-                    if column_index >= 5: break;
-
-            if self._raster_columns and column_index < 5:
-                for column in self._raster_columns:
-                    self._spatial_type += (3 << 4) << (column_index * 6)
-                    column_index += 1
-                    if column_index >= 5: break;
-
-            self._spatial_type_desc = SpatialTable.get_spatial_type_desc(self._spatial_type)
+            self._spatial_info_desc = None
+        finally:
+            if self._sql:
+                self._dbUtil.execute("DROP VIEW IF EXISTS \"{0}\".\"{1}\"".format(self._schema,self._table))
 
     def _retrieve_bbox(self):
-        self._bbox = False
-        if self._geometry_columns:
+        if self._bbox_retrieved or self._schema is None:
+            return
+
+        if self.geometry_columns:
             row = None
-            for column in self._geometry_columns:
+            for column in self.geometry_columns:
                 row = self._dbUtil.get(SpatialTable._retrieve_bbox_sql.format(self._schema,self._table,column[0]))
                 if any(row):
                     column[2] =  (row[0],row[1],row[2],row[3])
                 else:
                     column[2] =  (108,-45,155,-10)
                 
-        if self._geography_columns:
+        if self.geography_columns:
             row = None
-            for column in self._geography_columns:
+            for column in self.geography_columns:
                 row = self._dbUtil.get(SpatialTable._retrieve_bbox_sql.format(self._schema,self._table,column[0]))
                 if row[0]:
                     column[2] =  (row[0],row[1],row[2],row[3])
                 else:
                     column[2] =  (108,-45,155,-10)
-                
-        self._bbox = True
+
+        self._spatial_info_desc = None
+        self._spatial_info_version = None
+        self._bbox_retrieved = True
 
     def _retrieve_crs(self):
-        self._crs = False
-        if self._geometry_columns:
+        if self._crs_retrieved or self._schema is None: 
+            return
+
+        if self.geometry_columns:
             row = None
-            for column in self._geometry_columns:
-                row = self._dbUtil.get(SpatialTable._retrieve_crs_sql.format(self._schema,self._table,column[0]))
+            for column in self.geometry_columns:
+                row = self._dbUtil.get(SpatialTable._retrieve_geometry_crs_sql.format(self._schema,self._table,column[0]))
                 column[3] =  "EPSG:{}".format(row[0]) if row else settings.DEFAULT_CRS
                 
-        if self._geography_columns:
+        if self.geography_columns:
             row = None
-            for column in self._geography_columns:
-                row = self._dbUtil.get(SpatialTable._retrieve_crs_sql.format(self._schema,self._table,column[0]))
+            for column in self.geography_columns:
+                row = self._dbUtil.get(SpatialTable._retrieve_geography_crs_sql.format(self._schema,self._table,column[0]))
                 column[3] =  "EPSG:{}".format(row[0]) if row else settings.DEFAULT_CRS
                 
-        self._crs = True
+        self._spatial_info_desc = None
+        self._spatial_info_version = None
+        self._crs_retrieved = True
 
+    def get_create_table_sql(self):
+        sql = getattr(self,"_create_sql",None)
+        if not sql and not self._sql:
+            sql = self._dbUtil.get_create_table_sql(self._table,self._schema)
+            setattr(self,"_create_sql",sql)
+        return sql
+
+    @staticmethod
+    def get_bbox(dbUtil,sql):
+        row = dbUtil.get("SELECT public.ST_XMIN(bbox), public.ST_YMIN(bbox), public.ST_XMAX(bbox), public.ST_YMAX(bbox) FROM (SELECT public.st_extent(the_geom) AS bbox  FROM ({}))".format(sql) )
+        if any(row):
+            return  (row[0],row[1],row[2],row[3])
+        else:
+            return  (108,-45,155,-10)
+
+    def _get_spatial_column(self,column_name=None,index=None):
+        if column_name:
+            for columns in  (self._spatial_info):
+                if columns:
+                    for column in columns:
+                        if column[0] == column_name:
+                            return column
+        else:
+            for columns in  (self._spatial_info):
+                if columns:
+                    if len(columns) > index:
+                        return columns[index]
+                    else:
+                        index = index - len(columns)
+        return None
+
+    def spatial_column(self,index=0):
+        column = self._get_spatial_column(index = index)
+        return column[0] if column else None
+
+    def spatial_type_by_index(self,index=0):
+        column = self._get_spatial_column(index = index)
+        return column[1] if column else None
+
+    def bbox(self,column_name):
+        self._retrieve_bbox()
+        column = self._get_spatial_column(column_name=column_name)
+        return column[2] if column else None
+
+    def bbox_by_index(self,index):
+        self._retrieve_bbox()
+        column = self._get_spatial_column(index=index)
+        return column[2] if column else None
+
+    def crs(self,column_name):
+        self._retrieve_crs()
+        column = self._get_spatial_column(column_name=column_name)
+        return column[3] if column else None
+
+    def crs_by_index(self,index):
+        self._retrieve_crs()
+        column = self._get_spatial_column(index=index)
+        return column[3] if column else None
 
     @property
-    def spatial_column(self):
-        return self._geometry_columns[0][0] if self._geometry_columns else (self._geography_columns[0][0] if self._geography_columns else ( self._raster_columns[0][0] if self._raster_columns else None))
+    def spatial_info(self):
+        json_data = json.dumps(self._spatial_info)
+        self._spatial_info_version = hashcode(json_data)
+        return json_data
 
     @property
-    def bbox(self):
-        return self._geometry_columns[0][2] if self._geometry_columns else (self._geography_columns[0][2] if self._geography_columns else ( self._raster_columns[0][2] if self._raster_columns else None))
-
-    @property
-    def crs(self):
-        return self._geometry_columns[0][3] if self._geometry_columns else (self._geography_columns[0][3] if self._geography_columns else ( self._raster_columns[0][3] if self._raster_columns else None))
-
-    @property
-    def geometry_columns(self):
-        return self._geometry_columns
-
-    @property
-    def geography_columns(self):
-        return self._geography_columns
-
-    @property
-    def spatial_type(self):
-        return self._spatial_type
-
-    @property
-    def spatial_type_desc(self):
-        return self._spatial_type_desc
+    def spatial_info_desc(self):
+        if not self._spatial_info_desc:
+            msg = ""
+            for columns in self._spatial_info:
+                if columns:
+                    for column in columns:
+                        if column[1]:
+                            if column[2]:
+                                column_desc = "{} {}({}) {}".format(column[0],column[1] or "Unknown",column[3] or "Unknown" ,column[2] or "")
+                            else:
+                                column_desc = "{} {}({})".format(column[0],column[1] or "Unknown",column[3] or "Unknown" )
+                        msg = "{}{}{}".format(msg,os.linesep,column_desc) if msg else column_desc
+            self._spatial_info_desc = msg
+        return self._spatial_info_desc
 
     @property
     def is_geometry(self):
-        return SpatialTable.check_geometry(self._spatial_type)
+        return self.geometry_columns and True or False
 
     @property
     def is_geography(self):
-        return SpatialTable.check_geography(self._spatial_type)
+        return self.geography_columns and True or False
 
     @property
     def is_raster(self):
-        return SpatialTable.check_raster(self._spatial_type)
+        return self.raster_columns and True or False
 
     @property
     def is_normal(self):
-        return SpatialTable.check_normal(self._spatial_type)
+        return not self.is_spatial
 
     @property
     def is_spatial(self):
-        return SpatialTable.check_spatial(self._spatial_type)
+        return self.is_geometry or self.is_geography or self.is_raster
 
     def create_indexes(self):
         """
@@ -213,7 +293,7 @@ class SpatialTable(object):
         """
         index_name = None
         index_exists = False
-        for c in self._geometry_columns:
+        for c in self.geometry_columns:
             #import ipdb; ipdb.set_trace()
             index_name = "{0}_{1}".format(self._table,c[0])
             index_exists = self._dbUtil.exists(SpatialTable._check_index_sql.format(self._schema,self._table,index_name))
@@ -225,111 +305,98 @@ class SpatialTable(object):
         drop gist index for each geometry column and geography column
         """
         index_name = None
-        for c in self._geometry_columns:
+        for c in self.geometry_columns:
             #import ipdb; ipdb.set_trace()
             index_name = "{0}_{1}".format(self._table,c[0])
             self._dbUtil.update(SpatialTable._drop_index_sql.format(self._schema,index_name))
 
-    @staticmethod
-    def get_spatial_type_desc(spatial_type):
-        if spatial_type:
-            index = 0   
-            desc = None
-            while index < 5:
-                type_category = (spatial_type  >> (index * 6) + 4) & 0b11
-                column_type_id = (spatial_type  >> (index * 6)) & 0b001111
-                index += 1
-                if type_category == 0:
-                    break
-                elif type_category == 1:
-                    s = "Geometry"
-                elif type_category == 2:
-                    s = "Geography"
-                elif type_category == 3:
-                    s = "Raster"
-                if column_type_id > 0:
-                    try:
-                        s = "{0}({1})".format(s,SpatialTable._types[column_type_id])
-                    except:
-                        pass
-                if desc:
-                    desc = "{0} | {1}".format(desc,s)
-                else:
-                    desc = s
-            return desc
-        else:
-            return "Normal Table"
-
-    @staticmethod
-    def check_geometry(spatial_type):
-        index = 0
-        while index < 5:
-            value = (spatial_type >> index * 6) & 0b110000
-            if value == 0: 
-                break
-            elif value == 0b010000: 
-                return True
-            index = index + 1
-
-        return False
-            
-    @staticmethod
-    def check_geography(spatial_type):
-        index = 0
-        while index < 5:
-            value = (spatial_type >> index * 6) & 0b110000
-            if value == 0: 
-                break
-            elif value == 0b100000: 
-                return True
-            index = index + 1
-
-        return False
-            
-    @staticmethod
-    def check_raster(spatial_type):
-        index = 0
-        while index < 5:
-            value = (spatial_type >> index * 6) & 0b110000
-            if value == 0: 
-                break
-            elif value == 0b110000: 
-                return True
-            index = index + 1
-
-        return False
-            
-    @staticmethod
-    def check_normal(spatial_type):
-        return spatial_type == 0
-            
-    @staticmethod
-    def check_spatial(spatial_type):
-        return spatial_type > 0
-            
-        
+SpatialTableCache = {}
 class SpatialTableMixin(object):
+    def spatialTable(self,schema=None,refresh=False,bbox=False,crs=False):
+        o = getattr(self,"_spatialTable",None)
+        if not o:
+            schema = schema or self.table_schema
+            dbUtil = self.db_util or defaultDbUtil
+            try:
+                o = SpatialTableCache[(dbUtil.id,self.table_schema,self.table_name)]
+                if refresh:
+                    #print "refresh cached spatialTable for table ({}.{}).bbox={}, crs={}, refresh={}".format(self.table_schema,self.table_name,bbox,crs,refresh)
+                    o._schema = schema
+                    o.refresh(bbox,crs)
+                elif o._spatial_info_version and self.spatial_info and o._spatial_info_version != hashcode(self.spatial_info):
+                    #print "reload the spatialTable for table ({}.{}).bbox={}, crs={}, refresh={}, version = {}, new version= {}".format(self.table_schema,self.table_name,bbox,crs,refresh,o._spatial_info_version,hashcode(self.spatial_info))
+                    o.load(self.spatial_info)
+                else:
+                    #print "get cached spatialTable for table ({}.{}).bbox={}, crs={}, refresh={}, version = {}, new version= {}".format(self.table_schema,self.table_name,bbox,crs,refresh,o._spatial_info_version,hashcode(self.spatial_info))
+                    pass
+            except:
+                #print "create spatialTable for table ({}.{}).bbox={}, crs={}, refresh={}".format(self.table_schema,self.table_name,bbox,crs,refresh)
+                o = SpatialTable(
+                    dbUtil,
+                    schema or self.table_schema,
+                    self.table_name,
+                    sql=getattr(self,"table_sql",None),
+                    spatial_info=None if refresh else self.spatial_info,
+                    bbox=bbox,
+                    crs=crs
+                )
+                SpatialTableCache[(dbUtil.id,self.table_schema,self.table_name)] = o
+            setattr(self,"_spatialTable",o)
+
+        return o
+
+    def refresh_spatial_info(self,schema=None,bbox=True,crs=True):
+        self.spatialTable(schema=schema,refresh=True,bbox=bbox,crs=crs)
+        return self
+
+    def create_indexes(self,schema=None):
+        self.spatialTable(schema).create_indexes()
+
+    def drop_indexes(self,schema=None):
+        self.spatialTable(schema).refresh().drop_indexes()
+
+    def get_create_table_sql(self):
+        return self.spatialTable().get_create_table_sql()
+
     @property
     def is_normal(self):
-        return SpatialTable.check_normal(self.spatial_type)
+        return self.spatialTable().is_normal
     
     @property
     def is_spatial(self):
-        return SpatialTable.check_spatial(self.spatial_type)
+        return self.spatialTable().is_spatial
     
     @property
     def is_raster(self):
-        return SpatialTable.check_raster(self.spatial_type)
+        return self.spatialTable().is_raster
     
     @property
     def is_geometry(self):
-        return SpatialTable.check_geometry(self.spatial_type)
+        return self.spatialTable().is_geometry
     
     @property
     def is_geography(self):
-        return SpatialTable.check_geography(self.spatial_type)
+        return self.spatialTable().is_geography
 
     @property
-    def spatial_type_desc(self):
-        return SpatialTable.get_spatial_type_desc(self.spatial_type)
+    def spatial_info_desc(self):
+        return self.spatialTable().spatial_info_desc
+
+    def get_spatial_info(self):
+        return self.spatialTable().spatial_info
+
+    @property
+    def spatial_column(self):
+        return self.spatialTable().spatial_column(0)
+
+    @property
+    def spatial_type(self):
+        return self.spatialTable().spatial_type_by_index(0)
+  
+    @property
+    def bbox(self):
+        return self.spatialTable().bbox_by_index(0)
     
+    @property
+    def crs(self):
+        return self.spatialTable().crs_by_index(0)
