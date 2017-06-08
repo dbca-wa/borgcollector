@@ -28,7 +28,6 @@ from harvest.jobstates import JobState
 from borg.admin import site
 from harvest.jobstatemachine import JobStatemachine
 from borg_utils.jobintervals import JobInterval
-from borg_utils.spatial_table import SpatialTable
 from borg_utils.borg_config import BorgConfiguration
 from borg_utils.resource_status import ResourceStatus
 from borg_utils.hg_batch_push import try_set_push_owner, try_clear_push_owner, increase_committed_changes, try_push_to_repository
@@ -468,7 +467,7 @@ class NormalTableAdmin(VersionAdmin):
 
 class InputAdmin(VersionAdmin,JobFields):
     list_display = ("name","_data_source", "geometry", "extent", "count","last_modify_time",_up_to_date,"_job_id", "_job_batch_id", "_job_status")
-    readonly_fields = ("spatial_type_desc","_style_file","title","abstract","_create_table_sql","ds_modify_time","last_modify_time",_up_to_date,"_job_batch_id","_job_id","_job_status","_job_message")
+    readonly_fields = ("spatial_info_desc","_style_file","title","abstract","_create_table_sql","ds_modify_time","last_modify_time",_up_to_date,"_job_batch_id","_job_id","_job_status","_job_message")
     search_fields = ["name","data_source__name"]
 
     form = InputForm
@@ -492,10 +491,6 @@ class InputAdmin(VersionAdmin,JobFields):
 
     _data_source.allow_tags = True
     _data_source.short_description = "Datasource"
-
-    def spatial_type_desc(self,o):
-        return SpatialTable.get_spatial_type_desc(o.spatial_type)
-    spatial_type_desc.short_description = "Spatial Type"
 
     def _style_file(self,o):
         if o.style_file():
@@ -627,8 +622,8 @@ class NormaliseAdmin(VersionAdmin,JobFields):
         return actions 
 
 class PublishAdmin(VersionAdmin,JobFields):
-    list_display = ("name","_workspace","spatial_type_desc","interval","_enabled","_publish_content","_job_id", "_job_batch_id", "_job_status","waiting","running","completed","failed")
-    readonly_fields = ("_create_table_sql","spatial_type_desc","last_modify_time","_publish_content","_job_batch_id","_job_id","_job_status","_job_message","waiting","running","completed","failed")
+    list_display = ("name","_workspace","spatial_column","spatial_type","crs","interval","_enabled","_publish_content","_job_id", "_job_batch_id", "_job_status","waiting","running","completed","failed")
+    readonly_fields = ("spatial_column","spatial_type","crs","_create_table_sql","spatial_info_desc","last_modify_time","_publish_content","_job_batch_id","_job_id","_job_status","_job_message","waiting","running","completed","failed")
     search_fields = ["name","status","workspace__name"]
 
     form = PublishForm
@@ -636,7 +631,7 @@ class PublishAdmin(VersionAdmin,JobFields):
     _geoserver_setting_fields = [f[0] for f in PublishForm.base_fields.items() if hasattr(f[1],"setting_type") and f[1].setting_type == "geoserver_setting"]
 
     def get_fields(self, request, obj=None):
-        if obj and SpatialTable.check_normal(obj.spatial_type):
+        if obj and obj.is_normal:
             base_fields = ['name','workspace','interval','status','input_table','dependents','priority','sql','create_extra_index_sql']
         else:
             base_fields = ['name','workspace','interval','status','input_table','dependents','priority','sql','create_extra_index_sql',"create_cache_layer","server_cache_expire","client_cache_expire"]
@@ -659,11 +654,6 @@ class PublishAdmin(VersionAdmin,JobFields):
         return str(result) if result is not None else ""
     _publish_content.short_description = "Publish"
 
-    def spatial_type_desc(self,o):
-        return SpatialTable.get_spatial_type_desc(o.spatial_type)
-    spatial_type_desc.short_description = "Spatial Type"
-    spatial_type_desc.admin_order_field = "spatial_type"
-            
     def _create_table_sql(self,o):
         if o.create_table_sql:
             return "<p style='white-space:pre'>" + o.create_table_sql + "</p>"
