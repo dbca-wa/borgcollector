@@ -23,7 +23,7 @@ from borg_utils.borg_config import BorgConfiguration
 from borg_utils.resource_status import ResourceStatus,ResourceStatusMixin,ResourceAction
 from borg_utils.transaction import TransactionMixin
 from borg_utils.db_util import DbUtil
-from borg_utils.spatial_table import SpatialTable
+from borg_utils.spatial_table import SpatialTableMixin
 from borg_utils.signals import inherit_support_receiver
 from borg_utils.models import BorgModel,SQLField
 from borg_utils.utils import file_md5
@@ -162,7 +162,7 @@ class Datasource(BorgModel,ResourceStatusMixin,TransactionMixin):
             Layer.objects.filter(datasource=self).exclude(last_refresh_time=now).delete()
 
             for viewlayer in self.sqlviewlayer_set.all():
-                viewlayer.refersh(now)
+                viewlayer.refresh(now)
 
             self.layers = Layer.objects.filter(datasource=self).count()
             self.last_refresh_time = now
@@ -280,14 +280,12 @@ class Datasource(BorgModel,ResourceStatusMixin,TransactionMixin):
         ordering = ("name",)
 
 
-class Layer(BorgModel,ResourceStatusMixin,TransactionMixin):
+class Layer(BorgModel,ResourceStatusMixin,TransactionMixin,SpatialTableMixin):
     table = models.SlugField(max_length=64,null=False,editable=True)
     datasource = models.ForeignKey(Datasource,editable=False,on_delete=models.CASCADE)
     type = models.CharField(max_length=8,null=False,editable=False)
-    spatial_type = models.IntegerField(default=1,editable=False)
+    spatial_info = models.TextField(max_length=512,editable=False,null=True,blank=True)
     sql = models.TextField(null=True, editable=False)
-    crs = models.CharField(max_length=64,editable=False,null=True,blank=True)
-    bbox = models.CharField(max_length=128,null=True,editable=False)
     kmi_bbox = models.CharField(max_length=128,null=True,blank=True,editable=True)
     name = models.CharField(max_length=256,null=True,editable=True,blank=True,unique=True)
     geoserver_setting = models.TextField(blank=True,null=True,editable=False)
@@ -298,6 +296,18 @@ class Layer(BorgModel,ResourceStatusMixin,TransactionMixin):
     last_refresh_time = models.DateTimeField(null=False,editable=False)
     last_modify_time = models.DateTimeField(null=True,editable=False)
 
+
+    @property
+    def table_name(self):
+        return self.table
+
+    @property
+    def table_schema(self):
+        return self.datasource.schema
+
+    @property
+    def db_util(self):
+        return self.datasource.dbUtil
 
     @staticmethod
     def is_system_table(table):
@@ -318,18 +328,13 @@ class Layer(BorgModel,ResourceStatusMixin,TransactionMixin):
             time = time or timezone.now()
             if Layer.is_system_table(self.table):
                 return False
-
-            st = SpatialTable.get_instance(self.datasource.schema,self.table,refresh=True,bbox=True,crs=True,dbUtil=self.datasource.dbUtil)
             self.last_refresh_time = time
-            bbox = json.dumps(st.bbox)
-            sql = st.get_create_table_sql()
-            if not self.sql or self.sql != sql or st.crs != self.crs or st.spatial_type != self.spatial_type or bbox != self.bbox:
-                self.crs = st.crs
-                self.bbox = bbox
-                self.spatial_type = st.spatial_type
+            new_spatial_info = self.refresh_spatial_info().get_spatial_info()
+            if not self.sql or self.sql != self.get_create_table_sql() or self.spatial_info != new_spatial_info:
+                self.spatial_info = new_spatial_info
                 self.last_modify_time = time
+                self.sql = self.get_create_table_sql()
                 self.status = self.next_status(ResourceAction.UPDATE)
-                self.sql = sql
             self.save()
 
             return True
@@ -342,9 +347,9 @@ class Layer(BorgModel,ResourceStatusMixin,TransactionMixin):
         meta_data["workspace"] = self.datasource.workspace.name
         meta_data["name"] = self.kmi_name
         meta_data["service_type"] = "WMS"
-        if SpatialTable.check_normal(self.spatial_type) or not self.datasource.workspace.publish_channel.sync_geoserver_data:
+        if self.is_normal or not self.datasource.workspace.publish_channel.sync_geoserver_data:
             meta_data["service_type"] = ""
-        elif SpatialTable.check_raster(self.spatial_type):
+        elif self.is_raster:
             meta_data["service_type"] = "WMS"
             meta_data["service_type_version"] = self.datasource.workspace.publish_channel.wms_version
         else:
@@ -420,8 +425,12 @@ class Layer(BorgModel,ResourceStatusMixin,TransactionMixin):
         meta_data["datastore"] = self.datasource.name
         meta_data["auth_level"] = self.datasource.workspace.auth_level
         meta_data["preview_path"] = "{}{}".format(BorgConfiguration.MASTER_PATH_PREFIX, BorgConfiguration.PREVIEW_DIR)
-        meta_data["spatial_data"] = SpatialTable.check_spatial(self.spatial_type)
-        meta_data["spatial_type"] = SpatialTable.get_spatial_type_desc(self.spatial_type)
+        meta_data["spatial_data"] = self.is_spatial
+        if self.is_spatial:
+            meta_data["bbox"] = bbox
+            meta_data["crs"] = crs
+            meta_data["spatial_type"] = self.spatial_type
+            meta_data["spatial_column"] = self.spatial_column
 
         meta_data["channel"] = self.datasource.workspace.publish_channel.name
         meta_data["sync_geoserver_data"] = self.datasource.workspace.publish_channel.sync_geoserver_data
@@ -432,12 +441,11 @@ class Layer(BorgModel,ResourceStatusMixin,TransactionMixin):
         #bbox
         if "bounding_box" in meta_data:
             del meta_data["bounding_box"]
-        meta_data["bbox"] = bbox
-        meta_data["crs"] = crs
 
         return meta_data
 
     def save(self, force_insert=False, force_update=False, using=None, update_fields=None):
+        if not self.data_changed: return
         try:
             if self.try_begin_transaction("livelayer_save"):
                 with transaction.atomic():
@@ -629,14 +637,12 @@ class PublishedLayer(Layer):
         verbose_name="Published layer"
         verbose_name_plural="Published layers"
 
-class SqlViewLayer(BorgModel,ResourceStatusMixin,TransactionMixin):
+class SqlViewLayer(BorgModel,ResourceStatusMixin,TransactionMixin,SpatialTableMixin):
     name = models.SlugField(max_length=60,null=False,blank=False,editable=True,unique=True, help_text="The name of live layer", validators=[validate_slug])
     datasource = models.ForeignKey(Datasource,editable=True,null=False,blank=False,on_delete=models.CASCADE)
     viewsql = SQLField(null=False,blank=False)
-    spatial_type = models.IntegerField(default=1,editable=False)
+    spatial_info = models.TextField(max_length=512,editable=False,null=True,blank=True)
     sql = models.TextField(null=True, editable=False)
-    crs = models.CharField(max_length=64,editable=False,null=True,blank=True)
-    bbox = models.CharField(max_length=128,null=True,editable=False)
     kmi_bbox = models.CharField(max_length=128,null=True,blank=True,editable=True)
     geoserver_setting = models.TextField(blank=True,null=True,editable=False)
     status = models.CharField(max_length=32, null=False, editable=False,choices=ResourceStatus.layer_status_options,default=ResourceStatus.New.name)
@@ -647,35 +653,43 @@ class SqlViewLayer(BorgModel,ResourceStatusMixin,TransactionMixin):
     last_modify_time = models.DateTimeField(null=True,editable=False)
     create_time = models.DateTimeField(auto_now=False,auto_now_add=True,editable=False,null=False)
 
+    @property
+    def table_name(self):
+        return self.name
+
+    @property
+    def table_schema(self):
+        return self.datasource.schema
+
+    @property
+    def table_sql(self):
+        return self.viewsql
+
+    @property
+    def db_util(self):
+        return self.datasource.dbUtil
+
     def clean(self):
         if not self.data_changed: return
         self.last_modify_time = timezone.now()
         self.status = self.next_status(ResourceAction.UPDATE)
         if not self.last_refresh_time:
             self.last_refresh_time = self.datasource.last_refresh_time
-        st = SpatialTable.get_instance(self.datasource.schema,self.name,refresh=True,bbox=True,crs=True,dbUtil=self.datasource.dbUtil,sql=self.viewsql)
-        self.crs = st.crs
-        self.bbox = json.dumps(st.bbox)
-        self.spatial_type = st.spatial_type
-        self.sql = st.get_create_table_sql()
+        self.spatial_info = self.refresh_spatial_info().get_spatial_info()
+        self.sql = self.get_create_table_sql()
 
     def refresh(self,time=None):
         self.try_begin_transaction("livesqlviewlayer_refresh")
         try:
             time = time or timezone.now()
 
-        
-            st = SpatialTable.get_instance(self.datasource.schema,self.name,refresh=True,bbox=True,crs=True,dbUtil=self.datasource.dbUtil,sql=self.viewsql)
+            new_spatial_info = self.refresh_spatial_info().get_spatial_info()
             self.last_refresh_time = time
-            bbox = json.dumps(st.bbox)
-            sql = st.get_create_table_sql()
-            if not self.sql or self.sql != sql or bbox != self.bbox or st.crs != self.crs or st.spatial_type != self.spatial_type:
-                self.crs = st.crs
-                self.bbox = bbox
-                self.spatial_type = st.spatial_type
+            if not self.sql or self.sql != self.get_create_table_sql() or self.spatial_info != new_spatial_info:
+                self.spatial_info = new_spatial_info
                 self.last_modify_time = time
+                self.sql = self.get_create_table_sql()
                 self.status = self.next_status(ResourceAction.UPDATE)
-                self.sql = sql
             self.save()
 
             return True
@@ -692,9 +706,9 @@ class SqlViewLayer(BorgModel,ResourceStatusMixin,TransactionMixin):
         meta_data["workspace"] = self.datasource.workspace.name
         meta_data["name"] = self.kmi_name
         meta_data["service_type"] = "WMS"
-        if SpatialTable.check_normal(self.spatial_type) or not self.datasource.workspace.publish_channel.sync_geoserver_data:
+        if self.is_normal or not self.datasource.workspace.publish_channel.sync_geoserver_data:
             meta_data["service_type"] = ""
-        elif SpatialTable.check_raster(self.spatial_type):
+        elif self.is_raster:
             meta_data["service_type"] = "WMS"
             meta_data["service_type_version"] = self.datasource.workspace.publish_channel.wms_version
         else:
@@ -768,8 +782,13 @@ class SqlViewLayer(BorgModel,ResourceStatusMixin,TransactionMixin):
         meta_data["datastore"] = self.datasource.name
         meta_data["auth_level"] = self.datasource.workspace.auth_level
         meta_data["preview_path"] = "{}{}".format(BorgConfiguration.MASTER_PATH_PREFIX, BorgConfiguration.PREVIEW_DIR)
-        meta_data["spatial_data"] = SpatialTable.check_spatial(self.spatial_type)
-        meta_data["spatial_type"] = SpatialTable.get_spatial_type_desc(self.spatial_type)
+        meta_data["spatial_data"] = self.is_spatial
+        if self.is_spatial:
+            meta_data["bbox"] = bbox
+            meta_data["crs"] = crs
+            meta_data["spatial_type"] = self.spatial_type
+            meta_data["spatial_column"] = self.spatial_column
+
 
         meta_data["channel"] = self.datasource.workspace.publish_channel.name
         meta_data["sync_geoserver_data"] = self.datasource.workspace.publish_channel.sync_geoserver_data
@@ -782,12 +801,11 @@ class SqlViewLayer(BorgModel,ResourceStatusMixin,TransactionMixin):
         #bbox
         if "bounding_box" in meta_data:
             del meta_data["bounding_box"]
-        meta_data["bbox"] = bbox
-        meta_data["crs"] = crs
 
         return meta_data
 
     def save(self, force_insert=False, force_update=False, using=None, update_fields=None):
+        if not self.data_changed: return
         try:
             if self.try_begin_transaction("livesqlviewlayer_save"):
                 with transaction.atomic():
@@ -880,7 +898,7 @@ class SqlViewLayer(BorgModel,ResourceStatusMixin,TransactionMixin):
         """
          publish layer's json reference (if exists) to the repository,
         """
-        import ipdb;ipdb.set_trace()
+        #import ipdb;ipdb.set_trace()
         json_filename = self.json_filename_abs('publish');
         try_set_push_owner("livesqlviewlayer")
         hg = None
@@ -1070,7 +1088,7 @@ class SqlViewLayerEventListener(object):
     @staticmethod
     @inherit_support_receiver(pre_save, sender=SqlViewLayer)
     def _pre_save(sender, instance, **args):
-        import ipdb;ipdb.set_trace()
+        #import ipdb;ipdb.set_trace()
         if "update_fields" in args and args['update_fields'] and "status" in args["update_fields"]:
             if instance.unpublish_required:
                 instance.unpublish()

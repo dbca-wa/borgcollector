@@ -18,9 +18,11 @@ class BorgModel(django.db.models.Model):
     @property
     def data_changed(self):
         if hasattr(self,"changed_fields"):
+            #user edit the model
             return getattr(self,"changed_fields") and True or False
         else:
-            return False
+            #triggered by other action,such as publish
+            return True
 
     def full_clean(self, exclude=None, validate_unique=True, form_cleaned=True):
         """

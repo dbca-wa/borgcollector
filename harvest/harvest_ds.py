@@ -10,7 +10,6 @@ from datetime import datetime
 from django.core.exceptions import ObjectDoesNotExist
 from django.utils import timezone
 
-from borg_utils.spatial_table import SpatialTable
 from borg_utils.resource_status import ResourceStatus
 
 from tablemanager.models import Input

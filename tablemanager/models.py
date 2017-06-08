@@ -40,7 +40,7 @@ from codemirror import CodeMirrorTextarea
 from sqlalchemy import create_engine
 
 from borg_utils.gdal import detect_epsg
-from borg_utils.spatial_table import SpatialTable,SpatialTableMixin
+from borg_utils.spatial_table import SpatialTableMixin
 from borg_utils.borg_config import BorgConfiguration
 from borg_utils.jobintervals import JobInterval
 from borg_utils.resource_status import ResourceStatus,ResourceStatusMixin
@@ -52,26 +52,35 @@ from borg_utils.utils import file_md5
 
 logger = logging.getLogger(__name__)
 
+def close_cursor(cursor):
+    try:
+        if not cursor:
+            return
+        if hasattr(cursor,"close"): cursor.close()
+    except:
+        pass
   
 slug_re = re.compile(r'^[a-z_][a-z0-9_]+$')
 validate_slug = RegexValidator(slug_re, "Slug can only start with lowercase letters or underscore, and contain lowercase letters, numbers and underscore", "invalid")
 
 def in_schema(search, db_url=None,input_schema=None,trans_schema=None,normal_schema=None):
-    if db_url:
-        cursor = create_engine(db_url).connect()
-    else:
-        cursor = connection.cursor()
+    try:
+        if db_url:
+            cursor = create_engine(db_url).connect()
+        else:
+            cursor = connection.cursor()
 
-    schema = search.split(",")[0]
-    schemas = {schema}
-    if input_schema: schemas.add(input_schema)
-    if trans_schema: schemas.add(trans_schema)
-    if normal_schema: schemas.add(normal_schema)
-    #import ipdb; ipdb.set_trace()
-    sql = ";".join(["CREATE SCHEMA IF NOT EXISTS \"{}\"".format(s) for s in schemas])
+        schema = search.split(",")[0]
+        schemas = {schema}
+        if input_schema: schemas.add(input_schema)
+        if trans_schema: schemas.add(trans_schema)
+        if normal_schema: schemas.add(normal_schema)
+        #import ipdb; ipdb.set_trace()
+        sql = ";".join(["CREATE SCHEMA IF NOT EXISTS \"{}\"".format(s) for s in schemas])
 
-    cursor.execute(sql)
-    if hasattr(cursor,"close"): cursor.close()
+        cursor.execute(sql)
+    finally:
+        close_cursor(cursor)
     sql = None
     schemas = None
     cursor = None
@@ -100,7 +109,7 @@ def in_schema(search, db_url=None,input_schema=None,trans_schema=None,normal_sch
             finally:
                 if cursor:
                     cursor.execute("SET search_path TO {0};".format(BorgConfiguration.BORG_SCHEMA))
-                    if hasattr(cursor,"close"): cursor.close()
+                    close_cursor(cursor)
                 cursor = None
 
             return result
@@ -320,8 +329,12 @@ class DataSourceEventListener(object):
     def _pre_delete(sender, instance, **args):
         # drop server and foreign tables.
         # testing table and server have been droped immediately after validation.
-        cursor=create_engine(settings.FDW_URL).connect()
-        instance.drop(cursor, "public",instance.name)
+        cursor=None
+        try:
+            cursor=create_engine(settings.FDW_URL).connect()
+            instance.drop(cursor, "public",instance.name)
+        finally:
+            close_cursor(cursor)
 
     @staticmethod
     @receiver(post_delete, sender=DataSource)
@@ -480,15 +493,19 @@ class ForeignTableEventListener(object):
     def _pre_delete(sender, instance, **args):
         # drop server and foreign tables.
         # testing table and server have been droped immediately after validation.
-        cursor=create_engine(settings.FDW_URL).connect()
-        instance.drop(cursor, "public",instance.name)
+        cursor = None
+        try:
+            cursor=create_engine(settings.FDW_URL).connect()
+            instance.drop(cursor, "public",instance.name)
+        finally:
+            close_cursor(cursor)
 
     @staticmethod
     @receiver(post_delete, sender=ForeignTable)
     def _post_delete(sender, instance, **args):
         refresh_select_choices.send(instance,choice_family="foreigntable")
 
-class Input(JobFields):
+class Input(JobFields,SpatialTableMixin):
     """
     Represents an input table in the harvest DB. Also contains source info
     (as a GDAL VRT definition) so it can be loaded using the OGR toolset.
@@ -500,7 +517,7 @@ class Input(JobFields):
     source = DatasourceField(help_text="GDAL VRT definition in xml", unique=True)
     advanced_options = models.CharField(max_length=128, null=True, editable=False,blank=True,help_text="Advanced ogr2ogr options")
     info = models.TextField(editable=False)
-    spatial_type = models.IntegerField(default=1,editable=False)
+    spatial_info = models.TextField(max_length=512,editable=False,null=True,blank=True)
     create_table_sql = models.TextField(null=True, editable=False)
     importing_info = models.TextField(max_length=255, null=True, editable=False)
     last_modify_time = models.DateTimeField(auto_now=False,auto_now_add=True,editable=False,null=False)
@@ -523,6 +540,18 @@ class Input(JobFields):
     @property
     def rowid_column(self):
         return BorgConfiguration.ROWID_COLUMN
+
+    @property
+    def table_name(self):
+        return self.name
+
+    @property
+    def table_schema(self):
+        return BorgConfiguration.TEST_INPUT_SCHEMA
+
+    @property
+    def db_util(self):
+        return defaultDbUtil
 
     _datasource = None
     _datasource_re = re.compile("<SrcDataSource>(?P<data_source>.*)</SrcDataSource>")
@@ -828,11 +857,11 @@ class Input(JobFields):
 
             self._populate_rowid(cursor,schema)
 
-            self.create_table_sql = defaultDbUtil.get_create_table_sql(self.name,BorgConfiguration.TEST_INPUT_SCHEMA)
+            self.create_table_sql = self.get_create_table_sql()
 
             #import ipdb;ipdb.set_trace()
             #check the table is spatial or non spatial
-            self.spatial_type = SpatialTable.get_instance(schema,self.name,True).spatial_type
+            self.spatial_info = self.refresh_spatial_info(schema).get_spatial_info()
         except ValidationError as e:
             raise e
         except Exception as e:
@@ -1160,9 +1189,13 @@ class InputEventListener(object):
     @receiver(pre_delete, sender=Input)
     def _pre_delete(sender, instance, **args):
         # drop tables in both schema
-        cursor=connection.cursor()
-        instance.drop(cursor, BorgConfiguration.TEST_INPUT_SCHEMA)
-        instance.drop(cursor, BorgConfiguration.INPUT_SCHEMA)
+        cursor = None
+        try:
+            cursor=connection.cursor()
+            instance.drop(cursor, BorgConfiguration.TEST_INPUT_SCHEMA)
+            instance.drop(cursor, BorgConfiguration.INPUT_SCHEMA)
+        finally:
+            close_cursor(cursor)
 
     @staticmethod
     @receiver(post_delete, sender=Input)
@@ -1491,9 +1524,13 @@ class NormaliseEventListener(object):
     @receiver(pre_delete, sender=Normalise)
     def _pre_delete(sender, instance, **args):
         # drop tables in both schema
-        cursor=connection.cursor()
-        instance.drop(cursor, BorgConfiguration.TRANSFORM_SCHEMA)
-        instance.drop(cursor, BorgConfiguration.TEST_TRANSFORM_SCHEMA)
+        cursor = None
+        try:
+            cursor=connection.cursor()
+            instance.drop(cursor, BorgConfiguration.TRANSFORM_SCHEMA)
+            instance.drop(cursor, BorgConfiguration.TEST_TRANSFORM_SCHEMA)
+        finally:
+            close_cursor(cursor)
 
     @staticmethod
     @receiver(pre_save, sender=Normalise)
@@ -1503,7 +1540,6 @@ class NormaliseEventListener(object):
         #import ipdb;ipdb.set_trace()
         #save relationship first
         instance._del_relations = []
-        cursor=connection.cursor()
         #break the relationship between normalise and normalise_normaltable
         pos = 0
         for relation in instance.relations:
@@ -1667,9 +1703,13 @@ class NormalTableEventListener(object):
     def _pre_delete(sender, instance, **args):
         # import ipdb;ipdb.set_trace()
         # drop tables in both schema
-        cursor=connection.cursor()
-        instance.drop(cursor, BorgConfiguration.NORMAL_SCHEMA)
-        instance.drop(cursor, BorgConfiguration.TEST_NORMAL_SCHEMA)
+        cursor = None
+        try:
+            cursor=connection.cursor()
+            instance.drop(cursor, BorgConfiguration.NORMAL_SCHEMA)
+            instance.drop(cursor, BorgConfiguration.TEST_NORMAL_SCHEMA)
+        finally:
+            close_cursor(cursor)
 
 class Normalise_NormalTable(BorgModel):
     """
@@ -1969,7 +2009,7 @@ class Publish(Transform,ResourceStatusMixin,SpatialTableMixin):
     status = models.CharField(max_length=32, choices=ResourceStatus.publish_status_options,default=ResourceStatus.Enabled.name)
     input_table = models.ForeignKey(Input, blank=True,null=True) # Referencing the schema which to introspect for the output of this transform
     sql = SQLField(default="$$".join(TRANSFORM).strip())
-    spatial_type = models.IntegerField(default=1,editable=False)
+    spatial_info = models.TextField(max_length=512,editable=False,null=True,blank=True)
     create_extra_index_sql = SQLField(null=True, editable=True,blank=True)
     priority = models.PositiveIntegerField(default=1000)
     create_table_sql = SQLField(null=True, editable=False)
@@ -2045,6 +2085,14 @@ class Publish(Transform,ResourceStatusMixin,SpatialTableMixin):
             return self.name
         else:
             return "{}_{}".format(self.workspace, self.name)
+
+    @property
+    def table_schema(self):
+        return self.workspace.test_schema
+
+    @property
+    def db_util(self):
+        return defaultDbUtil
 
     @property
     def normalises(self):
@@ -2137,7 +2185,8 @@ class Publish(Transform,ResourceStatusMixin,SpatialTableMixin):
             cursor.execute(sql)
 
         #create index
-        SpatialTable.get_instance(publish_schema,self.table_name,True).create_indexes()
+        #print "refresh spatial info for table (id={}, name={})".format(self.id,self.table_name)
+        self.refresh_spatial_info(publish_schema).create_indexes()
 
 
     def _create(self, cursor,schema,input_schema=None,normal_schema=None):
@@ -2200,10 +2249,10 @@ class Publish(Transform,ResourceStatusMixin,SpatialTableMixin):
             #invoke the normalise function to check whether it is correct or not.
             self.invoke(cursor,schema,normal_schema,self.workspace.test_view_schema,self.workspace.test_schema)
 
-            self.create_table_sql = defaultDbUtil.get_create_table_sql(self.table_name,self.workspace.test_schema)
+            self.create_table_sql = self.get_create_table_sql()
 
             #check the table is spatial or non spatial
-            self.spatial_type = SpatialTable.get_instance(self.workspace.test_schema,self.table_name,True).spatial_type
+            self.spatial_info = self.get_spatial_info()
 
             if self.pk and hasattr(self,"changed_fields")  and "status" in self.changed_fields:
                 #publish status changed.
@@ -2314,6 +2363,10 @@ class Publish(Transform,ResourceStatusMixin,SpatialTableMixin):
         self._create(cursor,schema,input_schema,normal_schema)
         self.workspace.execute(False)
         self.invoke(cursor,schema,normal_schema,self.workspace.view_schema,self.workspace.schema)
+        #save the latest spatial info
+        self.spatial_info = self.get_spatial_info()
+        #print "id={}, table_name={} , spatial_info = {}".format(self.id,self.table_name,self.spatial_info)
+        self.save(update_fields=["spatial_info"])
         self.job_run_time = begin_time
         self._post_execute(cursor)
 
@@ -2490,11 +2543,8 @@ class Publish(Transform,ResourceStatusMixin,SpatialTableMixin):
 
         #bbox
         if self.is_spatial:
-            cursor=connection.cursor()
-            st = SpatialTable.get_instance(self.workspace.schema,self.table_name,bbox=True,crs=True)
-            if st.spatial_column:
-                meta_data["bounding_box"] = st.bbox
-                meta_data["crs"] = st.crs
+            meta_data["bounding_box"] = self.bbox
+            meta_data["crs"] = self.crs
 
         meta_data["styles"] = []
         if self.workspace.publish_channel.sync_geoserver_data:
@@ -2552,7 +2602,6 @@ class Publish(Transform,ResourceStatusMixin,SpatialTableMixin):
                 if style_dump_dir:
                     #write the style into file system
                     style_file = os.path.join(style_dump_dir,"{}.{}.sld".format(self.table_name,style["name"]))
-                    print "{}".format(style)
                     with open(style_file,"wb") as f:
                         f.write(style["raw_content"].decode("base64"))
                     if md5:
@@ -2573,7 +2622,6 @@ class Publish(Transform,ResourceStatusMixin,SpatialTableMixin):
         meta_data["outdated_schema"] = self.workspace.publish_outdated_schema
         meta_data["channel"] = self.workspace.publish_channel.name
         meta_data["spatial_data"] = self.is_spatial
-        meta_data["spatial_type"] = self.spatial_type_desc
         meta_data["sync_postgres_data"] = self.workspace.publish_channel.sync_postgres_data
         meta_data["sync_geoserver_data"] = self.workspace.publish_channel.sync_geoserver_data
         meta_data["preview_path"] = "{}{}".format(BorgConfiguration.MASTER_PATH_PREFIX, BorgConfiguration.PREVIEW_DIR)
@@ -2588,6 +2636,8 @@ class Publish(Transform,ResourceStatusMixin,SpatialTableMixin):
         if self.is_spatial:
             meta_data["bbox"] = bbox
             meta_data["crs"] = crs
+            meta_data["spatial_type"] = self.spatial_type
+            meta_data["spatial_column"] = self.spatial_column
 
         return meta_data
 
@@ -2667,11 +2717,15 @@ class PublishEventListener(object):
         # drop tables in both schema
         if instance.waiting + instance.running > 0:
             raise Exception("Can not delete publish which has some waiting or running jobs.")
-        cursor=connection.cursor()
-        instance.drop(cursor, BorgConfiguration.TRANSFORM_SCHEMA,instance.workspace.schema)
-        instance.drop(cursor, BorgConfiguration.TEST_TRANSFORM_SCHEMA,instance.workspace.test_schema)
+        cursor = None
+        try:
+            cursor=connection.cursor()
+            instance.drop(cursor, BorgConfiguration.TRANSFORM_SCHEMA,instance.workspace.schema)
+            instance.drop(cursor, BorgConfiguration.TEST_TRANSFORM_SCHEMA,instance.workspace.test_schema)
 
-        instance.unpublish()
+            instance.unpublish()
+        finally:
+            close_cursor(cursor)
 
     @staticmethod
     @receiver(post_delete, sender=Publish)

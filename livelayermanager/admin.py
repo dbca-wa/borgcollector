@@ -13,7 +13,6 @@ from livelayermanager.forms import DatasourceForm,LayerForm,SqlViewLayerForm
 from borg.admin import site
 from borg_utils.resource_status import ResourceStatus,ResourceAction
 from borg_utils.hg_batch_push import try_set_push_owner, try_clear_push_owner, increase_committed_changes, try_push_to_repository
-from borg_utils.spatial_table import SpatialTable
 
 logger = logging.getLogger(__name__)
 
@@ -156,8 +155,8 @@ class DatasourceAdmin(admin.ModelAdmin):
         return actions 
 
 class AbstractLayerAdmin(admin.ModelAdmin):
-    list_display = ("table","name","_workspace","_datasource","spatial_type_desc","crs", "status","last_publish_time","last_refresh_time")
-    readonly_fields = ("_workspace","_datasource","spatial_type_desc","crs","_bounding_box", "status","_sql","last_publish_time","last_unpublish_time", "last_refresh_time","last_modify_time")
+    list_display = ("table","name","_workspace","_datasource","spatial_column","spatial_type","crs", "status","last_publish_time","last_refresh_time")
+    readonly_fields = ("_workspace","_datasource","spatial_column","spatial_type","crs","_bounding_box","status","spatial_info_desc","_sql","last_publish_time","last_unpublish_time", "last_refresh_time","last_modify_time")
     search_fields = ["table", "name"]
     ordering = ("datasource","name","table")
     list_filter = ("datasource",)
@@ -182,8 +181,8 @@ class AbstractLayerAdmin(admin.ModelAdmin):
         bounding_box = ["-","-","-","-"]
         if instance.bbox:
             try:
-                bounding_box = json.loads(instance.bbox)
-                if not bounding_box or not isinstance(bounding_box,list) or len(bounding_box) != 4:
+                bounding_box = instance.bbox
+                if not bounding_box :
                     bounding_box = ["-","-","-","-"]
             except:
                 bounding_box = ["-","-","-","-"]
@@ -200,11 +199,6 @@ class AbstractLayerAdmin(admin.ModelAdmin):
 
     _sql.allow_tags = True
     _sql.short_description = "CREATE info for table"
-
-    def spatial_type_desc(self,o):
-        return SpatialTable.get_spatial_type_desc(o.spatial_type)
-    spatial_type_desc.short_description = "Spatial Type"
-    spatial_type_desc.admin_order_field = "spatial_type"
 
     def _datasource(self,o):
         if o.datasource:
@@ -360,8 +354,8 @@ class PublishedLayerAdmin(AbstractLayerAdmin):
 
 
 class SqlViewLayerAdmin(admin.ModelAdmin):
-    list_display = ("name","_workspace","_datasource","spatial_type_desc","crs", "status","last_publish_time","last_refresh_time")
-    readonly_fields = ("_workspace","spatial_type_desc","crs","_bounding_box", "status","_sql","last_publish_time","last_unpublish_time", "last_refresh_time","last_modify_time")
+    list_display = ("name","_workspace","_datasource","spatial_column","spatial_type","crs", "status","last_publish_time","last_refresh_time")
+    readonly_fields = ("_workspace","spatial_column","spatial_type","crs","_bounding_box", "status","spatial_info_desc","_sql","last_publish_time","last_unpublish_time", "last_refresh_time","last_modify_time")
     search_fields = [ "name"]
     ordering = ("datasource","name")
     list_filter = ("datasource",)
@@ -386,8 +380,8 @@ class SqlViewLayerAdmin(admin.ModelAdmin):
         bounding_box = ["-","-","-","-"]
         if instance.bbox:
             try:
-                bounding_box = json.loads(instance.bbox)
-                if not bounding_box or not isinstance(bounding_box,list) or len(bounding_box) != 4:
+                bounding_box = instance.bbox
+                if not bounding_box:
                     bounding_box = ["-","-","-","-"]
             except:
                 bounding_box = ["-","-","-","-"]
@@ -404,11 +398,6 @@ class SqlViewLayerAdmin(admin.ModelAdmin):
 
     _sql.allow_tags = True
     _sql.short_description = "CREATE info for table"
-
-    def spatial_type_desc(self,o):
-        return SpatialTable.get_spatial_type_desc(o.spatial_type)
-    spatial_type_desc.short_description = "Spatial Type"
-    spatial_type_desc.admin_order_field = "spatial_type"
 
     def _datasource(self,o):
         if o.datasource:
