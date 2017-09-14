@@ -2271,7 +2271,9 @@ class Publish(Transform,ResourceStatusMixin,SpatialTableMixin):
         #use published meta file as the meta file for unpublish
         json_file = self.output_filename_abs('publish')
         if not os.path.exists(json_file):
-            raise Exception("Can't find the publish json file({}) in repository.".format(self.output_filename('publish')))
+            #raise Exception("Can't find the publish json file({}) in repository.".format(self.output_filename('publish')))
+            #no json file in repository, already unpublished
+            return
 
         json_out = None
         with open(json_file,"r") as f:
