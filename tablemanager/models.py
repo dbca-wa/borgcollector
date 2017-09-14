@@ -1015,9 +1015,12 @@ class Input(JobFields,SpatialTableMixin):
 
         p = subprocess.Popen(cmd, stdout=subprocess.PIPE,stderr=subprocess.PIPE)
         output = p.communicate()
-        error_msg = output[1].replace("ERROR 1: Invalid geometry field index : -1","")
-        if error_msg.strip():
-            raise Exception(error_msg)
+        if p.returncode != 0:
+            error_msg = output[1].replace("ERROR 1: Invalid geometry field index : -1","")
+            if error_msg.strip():
+                raise Exception(error_msg)
+            else:
+                raise Exception("orginfo failed with unknown exception")
         try:
             delattr(self,"_info_dict")
         except:
@@ -1115,8 +1118,11 @@ class Input(JobFields,SpatialTableMixin):
                 job.user_action = None
                 self._save_job(cursor,job,["user_action"])
             else:
-                if output[1].strip() :
-                    raise Exception(output[1])
+                if p.returncode != 0:
+                    if output[1].strip() :
+                        raise Exception(output[1])
+                    else:
+                        raise Exception("ogr2ogr failed with unknown exception")
                 self._set_info(database,table)
 
         return not cancelled
@@ -1278,20 +1284,6 @@ class Normalise(Transform):
 
     normal_table = None
 
-
-    def init_relations(self):
-        """
-        initialize relations
-        if relations is None, create a empty one
-        """
-        if self.relation_1 is None:
-            self.relation_1 = Normalise_NormalTable()
-
-        if self.relation_2 is None:
-            self.relation_2 = Normalise_NormalTable()
-
-        if self.relation_3 is None:
-            self.relation_3 = Normalise_NormalTable()
 
     def set_relation(self,pos,relation):
         """
@@ -1510,7 +1502,9 @@ class Normalise(Transform):
 
     def save(self, force_insert=False, force_update=False, using=None, update_fields=None):
         if not self.data_changed: return
+        #import ipdb;ipdb.set_trace()
         with transaction.atomic():
+            NormaliseEventListener.preprocess_relation(self)
             super(Normalise,self).save(force_insert,force_update,using,update_fields)
 
     def __str__(self):
@@ -1533,8 +1527,7 @@ class NormaliseEventListener(object):
             close_cursor(cursor)
 
     @staticmethod
-    @receiver(pre_save, sender=Normalise)
-    def _pre_save(sender, instance, **args):
+    def preprocess_relation(instance):
         if not instance.editing_mode:
             return
         #import ipdb;ipdb.set_trace()
@@ -1543,7 +1536,7 @@ class NormaliseEventListener(object):
         #break the relationship between normalise and normalise_normaltable
         pos = 0
         for relation in instance.relations:
-            if relation.is_empty:
+            if relation and relation.is_empty:
                 if relation.pk:
                     instance._del_relations.append(relation)
                 instance.set_relation(pos, None)
@@ -1556,6 +1549,11 @@ class NormaliseEventListener(object):
                 relation.save()
                 instance.set_relation(pos,relation)
             pos += 1
+
+    @staticmethod
+    @receiver(pre_save, sender=Normalise)
+    def _pre_save(sender, instance, **args):
+        pass
 
     @staticmethod
     @receiver(post_save, sender=Normalise)
@@ -2031,19 +2029,6 @@ class Publish(Transform,ResourceStatusMixin,SpatialTableMixin):
 
     default_layer_setting = {}
 
-    def init_relations(self):
-        """
-        initialize relations
-        if relations is None, create a empty one
-        """
-        if self.relation_1 is None:
-            self.relation_1 = Publish_NormalTable()
-
-        if self.relation_2 is None:
-            self.relation_2 = Publish_NormalTable()
-
-        if self.relation_3 is None:
-            self.relation_3 = Publish_NormalTable()
 
     def set_relation(self,pos,relation):
         """
@@ -2697,6 +2682,8 @@ class Publish(Transform,ResourceStatusMixin,SpatialTableMixin):
     def save(self, force_insert=False, force_update=False, using=None, update_fields=None):
         if not self.data_changed: return
         with transaction.atomic():
+            #import ipdb;ipdb.set_trace()
+            PublishEventListener.preprocess_relation(self)
             super(Publish,self).save(force_insert,force_update,using,update_fields)
 
     def __str__(self):
@@ -2733,20 +2720,15 @@ class PublishEventListener(object):
         refresh_select_choices.send(instance,choice_family="publish")
 
     @staticmethod
-    @receiver(pre_save, sender=Publish)
-    def _pre_save(sender, instance, **args):
-        if not instance.pk:
-            instance.new_object = True
-
+    def preprocess_relation(instance):
         if not instance.editing_mode:
             return
-
         #save relationship first
         instance._del_relations = []
         #break the relationship between publish and publish_normaltable
         pos = 0
         for relation in instance.relations:
-            if relation.is_empty:
+            if relation and relation.is_empty:
                 if relation.pk:
                     instance._del_relations.append(relation)
                 instance.set_relation(pos, None)
@@ -2759,6 +2741,14 @@ class PublishEventListener(object):
                 relation.save()
                 instance.set_relation(pos,relation)
             pos += 1
+
+
+
+    @staticmethod
+    @receiver(pre_save, sender=Publish)
+    def _pre_save(sender, instance, **args):
+        if not instance.pk:
+            instance.new_object = True
 
     @staticmethod
     @receiver(post_save, sender=Publish)
