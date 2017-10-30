@@ -88,20 +88,18 @@ MIDDLEWARE_CLASSES = (
     'django.middleware.clickjacking.XFrameOptionsMiddleware',
 )
 
+UWSGI_CACHE_FALLBACK = (os.environ.get('UWSGI_CACHE_FALLBACK') or 'false').lower() in ('true','yes','on')
+
 ROOT_URLCONF = 'borg.urls'
 CACHES = {
     "default": {
         "BACKEND": "django.core.cache.backends.dummy.DummyCache",
+    },
+    "shared":  {
+        "BACKEND":"uwsgicache.UWSGICache",
+        "LOCATION":"default"
     }
 }
-if os.environ.get("REDIS_URL",None):
-    CACHES["shared"] = {
-        "BACKEND":"django_redis.cache.RedisCache",
-        "LOCATION": os.environ.get("REDIS_URL"),
-        "OPTIONS": {
-            "CLIENT_CLASS": "django_redis.client.DefaultClient",
-        }
-    }
 
 
 WSGI_APPLICATION = 'borg.wsgi.application'

@@ -397,6 +397,7 @@ class WmsLayer(models.Model,ResourceStatusMixin,TransactionMixin):
     server = models.ForeignKey(WmsServer, null=False,editable=False)
     crs = models.CharField(max_length=64,null=True,editable=False)
     bbox = models.CharField(max_length=128,null=True,editable=False)
+    kmi_bbox = models.CharField(max_length=128,null=True,blank=True,editable=True)
     title = models.CharField(max_length=512,null=True,editable=False)
     abstract = models.TextField(null=True,editable=False)
     kmi_name = models.SlugField(max_length=128,null=False,editable=True,blank=False, validators=[validate_slug])
@@ -451,7 +452,7 @@ class WmsLayer(models.Model,ResourceStatusMixin,TransactionMixin):
         meta_data["modified"] = self.last_modify_time.astimezone(timezone.get_default_timezone()).strftime("%Y-%m-%d %H:%M:%S.%f") if self.last_modify_time else None
 
         #bbox
-        meta_data["bounding_box"] = self.bbox or None
+        meta_data["bounding_box"] = self.kmi_bbox or self.bbox or None
         meta_data["crs"] = self.crs or None
 
         #ows resource
@@ -494,6 +495,7 @@ class WmsLayer(models.Model,ResourceStatusMixin,TransactionMixin):
         meta_data["workspace"] = self.server.workspace.name
         meta_data["name"] = self.kmi_name
         meta_data["native_name"] = self.name
+        meta_data["override_bbox"] = True if self.kmi_bbox else False
         meta_data["store"] = self.server.name
         meta_data["auth_level"] = self.server.workspace.auth_level
         meta_data["preview_path"] = "{}{}".format(BorgConfiguration.MASTER_PATH_PREFIX, BorgConfiguration.PREVIEW_DIR)

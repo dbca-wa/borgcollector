@@ -218,17 +218,27 @@ class NormaliseForm(BorgModelForm):
         else:
             sorted_dependents = []
 
-        self.instance.init_relations()
-
         pos = 0
         normal_table_pos = 0
+        relation_index = 0
         length = len(sorted_dependents)
         for relation in (self.instance.relations):
             normal_table_pos = 0
-            for normal_table in relation.normal_tables:
-                relation.set_normal_table(normal_table_pos, sorted_dependents[pos] if pos < length else None)
-                pos += 1
-                normal_table_pos += 1
+            if pos < length:
+                if relation is None:
+                    relation = Normalise_NormalTable()
+                    self.instance.set_relation(relation_index,relation)
+
+            if relation is not None:
+                for normal_table in relation.normal_tables:
+                    if pos < length:
+                        relation.set_normal_table(normal_table_pos, sorted_dependents[pos])
+                    elif relation:
+                        relation.set_normal_table(normal_table_pos, None)
+
+                    pos += 1
+                    normal_table_pos += 1
+            relation_index += 1
 
 
     class Meta:
@@ -283,17 +293,25 @@ class PublishForm(BorgModelForm,GeoserverSettingForm):
         else:
             sorted_dependents = []
 
-        self.instance.init_relations()
-
         pos = 0
         normal_table_pos = 0
+        relation_index = 0
         length = len(sorted_dependents)
         for relation in (self.instance.relations):
             normal_table_pos = 0
-            for normal_table in relation.normal_tables:
-                relation.set_normal_table(normal_table_pos, sorted_dependents[pos] if pos < length else None)
-                pos += 1
-                normal_table_pos += 1
+            if pos < length:
+                if relation is None:
+                    relation = Publish_NormalTable()
+                    self.instance.set_relation(relation_index,relation)
+            if relation is not None:
+                for normal_table in relation.normal_tables:
+                    if pos < length:
+                        relation.set_normal_table(normal_table_pos, sorted_dependents[pos])
+                    elif relation:
+                        relation.set_normal_table(normal_table_pos, None)
+                    pos += 1
+                    normal_table_pos += 1
+            relation_index += 1
     
         if self.instance and self.instance.is_spatial:
             self.set_setting_to_model()
