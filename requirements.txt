@@ -3,12 +3,12 @@ django-suit==0.2.18
 django-extensions
 django-codemirror-widget
 django-reversion==2.0.3
-django-redis
 SQLAlchemy
 six
 dj-database-url
 django-wsgiserver==0.8.0rc1
 django-uwsgi[uwsgi]
+django-uwsgi-cache
 python-hglib
 requests
 honcho
