@@ -30,6 +30,7 @@ from wmsmanager.models import WmsLayer,WmsServer
 from harvest.jobstatemachine import JobStatemachine
 from monitor.models import SlaveServer,PublishSyncStatus
 from livelayermanager.models import Layer as LiveLayer
+from livelayermanager.models import SqlViewLayer as LiveSqlViewLayer
 
 from borg_utils.hg_batch_push import try_set_push_owner, try_clear_push_owner, try_push_to_repository
 from borg_utils.jobintervals import JobInterval
@@ -161,6 +162,7 @@ class MetadataApi(DjangoResource,BasicHttpAuthMixin):
                             pub.publish_meta_data()
                             resp[layer]["status"] = True
                             resp[layer]["message"] = "Succeed."
+                            continue
                         except:
                             msg = traceback.format_exc()
                             logger.error(msg)
@@ -169,45 +171,71 @@ class MetadataApi(DjangoResource,BasicHttpAuthMixin):
                             resp[layer]["message"] = "Publish meta data failed!{}".format(msg)
                             continue
                     except Publish.DoesNotExist:
-                        #not a publish object, try to locate it from live layers, and publish it if found
+                        pass
+                        
+                    #not a publish object, try to locate it from live layers, and publish it if found
+                    try:
+                        livelayer = LiveLayer.objects.filter(datasource__workspace__in=workspaces).get(Q(name=name) | Q(table=name))
                         try:
-                            livelayer = LiveLayer.objects.filter(datasource__workspace__in=workspaces).get(Q(name=name) | Q(table=name))
-                            try:
-                                target_status = livelayer.next_status(ResourceAction.PUBLISH)
-                                livelayer.status = target_status
-                                livelayer.save(update_fields=["status","last_publish_time"])
-                                resp[layer]["status"] = True
-                                resp[layer]["message"] = "Succeed."
-                            except :
-                                msg = traceback.format_exc()
-                                logger.error(msg)
-                                resp["status"] = False
-                                resp[layer]["status"] = False
-                                resp[layer]["message"] = "Publish live layer failed!{}".format(msg)
-                                continue
-                        except LiveLayer.DoesNotExist:
-                            #not a publish object, try to locate it from wms layers, and publish it if found
-                            try:
-                                wmslayer = WmsLayer.objects.get(server__workspace__in=workspaces,kmi_name=name)
-                                try:
-                                    target_status = wmslayer.next_status(ResourceAction.PUBLISH)
-                                    wmslayer.status = target_status
-                                    wmslayer.save(update_fields=["status","last_publish_time"])
-                                    resp[layer]["status"] = True
-                                    resp[layer]["message"] = "Succeed."
-                                except:
-                                    msg = traceback.format_exc()
-                                    logger.error(msg)
-                                    resp["status"] = False
-                                    resp[layer]["status"] = False
-                                    resp[layer]["message"] = "Publish wms layer failed!{}".format(msg)
-                                    continue
-                            except WmsLayer.DoesNotExist:
-                                #layer does not exist,
-                                resp["status"] = False
-                                resp[layer]["status"] = False
-                                resp[layer]["message"] = "Does not exist.".format(name)
-                                continue
+                            target_status = livelayer.next_status(ResourceAction.PUBLISH)
+                            livelayer.status = target_status
+                            livelayer.save(update_fields=["status","last_publish_time"])
+                            resp[layer]["status"] = True
+                            resp[layer]["message"] = "Succeed."
+                            continue
+                        except :
+                            msg = traceback.format_exc()
+                            logger.error(msg)
+                            resp["status"] = False
+                            resp[layer]["status"] = False
+                            resp[layer]["message"] = "Publish live layer failed!{}".format(msg)
+                            continue
+                    except LiveLayer.DoesNotExist:
+                        pass
+
+                    #not a publish object, try to locate it from live sqlview layers, and publish it if found
+                    try:
+                        livelayer = LiveSqlViewLayer.objects.get(datasource__workspace__in=workspaces,name=name)
+                        try:
+                            target_status = livelayer.next_status(ResourceAction.PUBLISH)
+                            livelayer.status = target_status
+                            livelayer.save(update_fields=["status","last_publish_time"])
+                            resp[layer]["status"] = True
+                            resp[layer]["message"] = "Succeed."
+                            continue
+                        except :
+                            msg = traceback.format_exc()
+                            logger.error(msg)
+                            resp["status"] = False
+                            resp[layer]["status"] = False
+                            resp[layer]["message"] = "Publish live sqlview layer failed!{}".format(msg)
+                            continue
+                    except LiveSqlViewLayer.DoesNotExist:
+                        pass
+
+                    #not a publish object, try to locate it from wms layers, and publish it if found
+                    try:
+                        wmslayer = WmsLayer.objects.get(server__workspace__in=workspaces,kmi_name=name)
+                        try:
+                            target_status = wmslayer.next_status(ResourceAction.PUBLISH)
+                            wmslayer.status = target_status
+                            wmslayer.save(update_fields=["status","last_publish_time"])
+                            resp[layer]["status"] = True
+                            resp[layer]["message"] = "Succeed."
+                            continue
+                        except:
+                            msg = traceback.format_exc()
+                            logger.error(msg)
+                            resp["status"] = False
+                            resp[layer]["status"] = False
+                            resp[layer]["message"] = "Publish wms layer failed!{}".format(msg)
+                            continue
+                    except WmsLayer.DoesNotExist:
+                        #layer does not exist,
+                        resp["status"] = False
+                        resp[layer]["status"] = False
+                        resp[layer]["message"] = "Does not exist.".format(name)
+                        continue
                 except :
                     msg = traceback.format_exc()
                     logger.error(msg)
