@@ -18,12 +18,13 @@ from django.template.loader import render_to_string
 from django.conf import settings
 
 from tablemanager.models import Publish,Workspace
-from harvest.models import Job
+from harvest.models import Job,JobLog
 from borg_utils.singleton import SingletonMetaclass,Singleton
 from borg_utils.borg_config import BorgConfiguration
 from borg_utils.utils import file_md5
 from borg_utils.resource_status import ResourceStatus
-from harvest.jobstates import JobStateOutcome,JobState,Failed,Completed
+from borg_utils.jobintervals import JobInterval
+from harvest.jobstates import JobStateOutcome,JobState,Failed,Completed,CompletedWithWarning
 
 logger = logging.getLogger(__name__)
 
@@ -46,6 +47,7 @@ class HarvestState(JobState):
     def default_transition_dict(cls):
         return {
             HarvestStateOutcome.failed : cls,
+            HarvestStateOutcome.shutdown : cls,
             HarvestStateOutcome.internal_error : cls,
             HarvestStateOutcome.cancelled_by_custodian : PostFailed,
         }
@@ -87,8 +89,8 @@ class Waiting(HarvestState):
                         #execute failed
                         try:
                             j = Job.objects.get(pk = o.job_id)
-                            if j.state in [Failed.instance().name,Completed.instance().name]:
-                                #failed job already cancelled. current job can execute
+                            if j.state in [Failed.instance().name,Completed.instance().name,CompletedWithWarning.instance().name]:
+                                #failed job already finished. current job can execute
                                 pass
                             else:
                                 #failed job is still running, current job must wait until the failed job execute successfully or cancelled
@@ -100,7 +102,7 @@ class Waiting(HarvestState):
                 elif o.job_batch_id:
                     #input is already executed by the job belonging to different job batch,
                     dependent_jobs = []
-                    for j in Job.objects.filter(batch_id = o.job_batch_id).exclude(state__in = [Failed.instance().name,Completed.instance().name]):
+                    for j in Job.objects.filter(batch_id = o.job_batch_id).exclude(state__in = [Failed.instance().name,Completed.instance().name,CompletedWithWarning.instance().name]):
                         for i in j.inputs:
                             if i.id == o.id:
                                 #input is used by other running jobs, the current job will continue to wait
@@ -129,7 +131,7 @@ class Waiting(HarvestState):
                         #executed failed
                         try:
                             j = Job.objects.get(pk = o.job_id)
-                            if j.state in [Failed.instance().name,Completed.instance().name]:
+                            if j.state in [Failed.instance().name,Completed.instance().name,CompletedWithWarning.instance().name]:
                                 #failed job already cancelled. current job can execute
                                 pass
                             else:
@@ -236,7 +238,7 @@ class ImportAndNormalizeState(HarvestState):
                         #failed by other job, check whether the failed job is still running or finished.
                         try:
                             j = Job.objects.get(pk=o.job_id)
-                            if j.state in [Failed.instance().name,Completed.instance().name]:
+                            if j.state in [Failed.instance().name,Completed.instance().name,CompletedWithWarning.instance().name]:
                                 #failed job has been failed or completed, current job can execute again
                                 pass
                             else:
@@ -270,7 +272,19 @@ class ImportAndNormalizeState(HarvestState):
                 else:
                     #update the status in input table to prevent other job execute it again
                     o.job_status = True
-                    o.job_message = 'Succeed'
+                    o.job_message = result[1] if result and result[1] else 'Succeed'
+            except KeyboardInterrupt:
+                result = (HarvestStateOutcome.shutdown, self.get_exception_message())
+                #update the status in input table to prevent other job execute it again
+                o.job_status = False
+                o.job_message = result[1]
+                break
+            except SystemExit:
+                result = (HarvestStateOutcome.shutdown, self.get_exception_message())
+                #update the status in input table to prevent other job execute it again
+                o.job_status = False
+                o.job_message = result[1]
+                break
             except:
                 result = (HarvestStateOutcome.failed, self.get_exception_message())
                 #update the status in input table to prevent other job execute it again
@@ -303,7 +317,10 @@ class Importing(ImportAndNormalizeState):
         """
         return a collection of tables which act as the input for the current state
         """
-        return [i for i in job.inputs if not i.is_up_to_date(job,previous_state.is_error_state)]
+        if job.job_type == JobInterval.Manually.name:
+            return [i for i in job.inputs]
+        else:
+            return [i for i in job.inputs if not i.is_up_to_date(job,previous_state.is_error_state)]
 
     def _execute(self,job,previous_state,input_table):
         """
@@ -618,7 +635,10 @@ class PostCompleted(HarvestState):
 
     @classmethod
     def transition_dict(cls):
-        return {HarvestStateOutcome.succeed:Completed}
+        return {
+            HarvestStateOutcome.succeed:Completed,
+            HarvestStateOutcome.warning:CompletedWithWarning
+        }
 
     def execute(self,job,previous_state):
         """
@@ -659,7 +679,10 @@ class PostCompleted(HarvestState):
             job.finished = timezone.now()
             job.save(update_fields=['finished'])
 
-        return (HarvestStateOutcome.succeed,None)
+        if JobLog.objects.filter(job=job,outcome=JobStateOutcome.warning).exists():
+            return (HarvestStateOutcome.warning,None)
+        else:
+            return (HarvestStateOutcome.succeed,None)
 
 class PostFailed(HarvestState):
     """
