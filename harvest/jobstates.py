@@ -11,6 +11,8 @@ class JobStateOutcome(object):
     """
     succeed = "Succeed"
     failed = "Failed"
+    shutdown = "Shutdown"
+    warning = "Warning"
     internal_error = "Internal Error"
     approved_by_custodian = "Approved by Custodian"
     cancelled_by_custodian = "Cancelled by Custodian"
@@ -110,8 +112,13 @@ class JobState(Singleton):
             for k in d:
                 normal_dict[k] = d[k]
 
+        #set the default warning transition
+        if JobStateOutcome.warning not in normal_dict and JobStateOutcome.succeed in normal_dict:
+            normal_dict[JobStateOutcome.warning] = normal_dict[JobStateOutcome.succeed]
+
         failed_dict = dict(self._failed_state.default_transition_dict())
         failed_dict[JobStateOutcome.failed] = self._failed_state
+        failed_dict[JobStateOutcome.shutdown] = self._failed_state
         failed_dict[JobStateOutcome.internal_error] = self._failed_state
         if self._failed_state._interactive_state:
             #import ipdb;ipdb.set_trace()
@@ -124,9 +131,11 @@ class JobState(Singleton):
         if JobStateOutcome.cancelled_by_custodian in normal_dict:
             failed_dict[JobStateOutcome.cancelled_by_custodian] = normal_dict[JobStateOutcome.cancelled_by_custodian]
         normal_dict[JobStateOutcome.failed] = self._failed_state
+        normal_dict[JobStateOutcome.shutdown] = self._failed_state
 
         error_dict = dict(self._internal_error_state.default_transition_dict())
         error_dict[JobStateOutcome.failed] = self._internal_error_state
+        error_dict[JobStateOutcome.shutdown] = self._internal_error_state
         error_dict[JobStateOutcome.internal_error] = self._internal_error_state
         error_dict[JobStateOutcome.succeed] = normal_dict[JobStateOutcome.internal_error]
         if JobStateOutcome.cancelled_by_custodian in normal_dict:
@@ -336,6 +345,14 @@ class Completed(JobState):
     This is a end state, represent the job is succeed
     """
     _name = "Completed"
+    _end_state = True
+    _cancellable = False
+
+class CompletedWithWarning(JobState):
+    """
+    This is a end state, represent the job is succeed but has warning message.
+    """
+    _name = "CompletedWithWarning"
     _end_state = True
     _cancellable = False
 

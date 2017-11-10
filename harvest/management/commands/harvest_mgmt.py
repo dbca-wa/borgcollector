@@ -2,6 +2,7 @@ import time
 import logging
 import traceback
 import atexit
+import sys
 from datetime import timedelta
 
 from django.core.management.base import BaseCommand
@@ -23,6 +24,24 @@ class RepeatedJob(object):
         self._interval = interval
         self._process = None
         self._options = options
+        try:
+            p = Process.objects.get(name=self.name)
+            if not p.can_run:
+                logger.info("The process () is already running on server {} with pid ({})".format(p.name,p.server,p.pid))
+                #force to reload process information.
+                self._process = None
+            elif not p.same_process:
+                #update the process info
+                p.server = Process.current_server
+                p.pid = Process.current_pid
+                p.status = "waiting"
+                p.save(update_fields=["server","pid","status"])
+            else:
+                p.status = "waiting"
+                p.save(update_fields=["status"])
+        except ObjectDoesNotExist:
+            p = Process(name=self.name,desc=self.desc,server=Process.current_server,pid=Process.current_pid,status="Init",next_scheduled_time=self._interval.next_scheduled_time())
+            p.save()
 
     @property
     def name(self):
@@ -75,20 +94,37 @@ class RepeatedJob(object):
 
         #after next scheduled time, begin to run
         p.last_starttime = timezone.now()
+        p.last_endtime = None
+        p.last_message = None
+        p.next_scheduled_time = self._interval.next_scheduled_time()
         p.status = "running"
-        p.save()
+        p.save(update_fields=["last_starttime","last_endtime","last_message","next_scheduled_time","status"])
         logger.info("Begin to run job ({})".format(self.name))
+        is_shutdown = False
         try:
             result = self.execute(now)
             logger.info("End to run job ({})".format(self.name))
             p.status = "waiting"
             if result is not None:
+                if isinstance(result,list):
+                    is_shutdown = result[0]
+                    result = result[1]
                 if isinstance(result,tuple):
                     p.last_message = self.last_message.format(*result)
                 else:
                     p.last_message = self.last_message.format(result)
             else:
                 p.last_message = self.last_message
+        except KeyboardInterrupt:
+            p.status = "error"
+            p.last_message = traceback.format_exc()
+            logger.error("Failed to run job ({}).\n{}".format(self.name,p.last_message))
+            is_shutdown = True
+        except SystemExit:
+            p.status = "error"
+            p.last_message = traceback.format_exc()
+            logger.error("Failed to run job ({}).\n{}".format(self.name,p.last_message))
+            is_shutdown = True
         except:
             p.status = "error"
             p.last_message = traceback.format_exc()
@@ -101,6 +137,9 @@ class RepeatedJob(object):
 
         p.next_scheduled_time = self._interval.next_scheduled_time()
         p.save(update_fields=["last_starttime","last_endtime","last_message","next_scheduled_time","status"])
+
+        if is_shutdown:
+            sys.exit(1)
 
         return p.next_scheduled_time
 

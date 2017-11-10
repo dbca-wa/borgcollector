@@ -12,6 +12,7 @@ import shutil
 import time
 import signal
 import json
+import StringIO
 import codecs
 import traceback
 import xml.etree.ElementTree as ET
@@ -1059,73 +1060,108 @@ class Input(JobFields,SpatialTableMixin):
             cmd += ['-a_srs', srid]
         logger.info(" ".join(cmd))
         cancelled = False
-        p = subprocess.Popen(cmd,stdout=subprocess.PIPE,stderr=subprocess.PIPE)
-        if validation:
-            sleep_time = 0
-            max_sleep_time = BorgConfiguration.MAX_TEST_IMPORT_TIME * 1000
-            finished = False
-            table_exist = False
-            while sleep_time < max_sleep_time or not table_exist:
-                if p.poll() is not None:
-                    finished = True
-                    break;
-                time.sleep(0.2)
-                sleep_time += 200
-                if not table_exist and sleep_time>= max_sleep_time:
-                    sql_result = cursor.execute("SELECT count(1) FROM pg_class a JOIN pg_namespace b ON a.relnamespace=b.oid where a.relname='{1}' and b.nspname='{0}'".format(schema,self.name))
-                    table_exist = bool(sql_result.fetchone()[0] if sql_result else cursor.fetchone()[0])
+        outputFile = None
+        errorFile = None
+        output = None
+        try:
+            outputFile = tempfile.NamedTemporaryFile(delete=False)
+            errorFile = tempfile.NamedTemporaryFile(delete=False)
+            logger.info("Importing data using ogr2ogr, name={},outputFile={},errorFile={}".format(self.name,outputFile.name,errorFile.name))
+            #p = subprocess.Popen(cmd,stdout=subprocess.PIPE,stderr=subprocess.PIPE)
+            p = subprocess.Popen(cmd,stdout=outputFile,stderr=errorFile)
+            if validation:
+                sleep_time = 0
+                max_sleep_time = BorgConfiguration.MAX_TEST_IMPORT_TIME * 1000
+                finished = False
+                table_exist = False
+                while sleep_time < max_sleep_time or not table_exist:
+                    if p.poll() is not None:
+                        finished = True
+                        break;
+    
+                    time.sleep(0.2)
+                    sleep_time += 200
+                    if not table_exist and sleep_time>= max_sleep_time:
+                        sql_result = cursor.execute("SELECT count(1) FROM pg_class a JOIN pg_namespace b ON a.relnamespace=b.oid where a.relname='{1}' and b.nspname='{0}'".format(schema,self.name))
+                        table_exist = bool(sql_result.fetchone()[0] if sql_result else cursor.fetchone()[0])
+    
+                if not finished:
+                    logger.info("The data set is too big, terminate the test importing process for '{0}'".format(self.name))
+                    cancelled = True
+                    try:
+                        p.terminate()
+                    except:
+                        pass
+    
+                returncode = p.wait()
+                output = (outputFile.read(),errorFile.read())
+                if returncode != signal.SIGTERM * -1 and output[1].strip():
+                    raise Exception(output[1])
+    
+            else:
+                sleep_time = 0
+                cancel_time = BorgConfiguration.IMPORT_CANCEL_TIME * 1000
+                from harvest.jobstates import JobStateOutcome
+                cancelled = False
+                while True:
+                    if p.poll() is not None:
+                        break;
+                    time.sleep(0.2)
+                    sleep_time += 200
 
-            if not finished:
-                logger.info("The data set is too big, terminate the test importing process for '{0}'".format(self.name))
-                cancelled = True
+                    if sleep_time >= cancel_time:
+                        sleep_time = 0
+                        job = self._get_job(cursor,job_id)
+                        if job.user_action and job.user_action.lower() == JobStateOutcome.cancelled_by_custodian.lower():
+                            #job cancelled
+                            try:
+                                p.terminate()
+                            except:
+                                pass
+                            cancelled = True
+                            logger.info("The job({1}) is cancelled, terminate the importing process for '{0}'".format(self.name,job_id))
+                            break;
+    
+                returncode = p.wait()
+                outputFile.seek(0)
+                errorFile.seek(0)
+                output = (outputFile.read(),errorFile.read())
+                if cancelled:
+                    #clear the user action
+                    job.user_action = None
+                    self._save_job(cursor,job,["user_action"])
+                else:
+                    if p.returncode != 0:
+                        if output[1].strip() :
+                            raise Exception(output[1])
+                        else:
+                            raise Exception("ogr2ogr failed with unknown exception")
+                    elif output[1]:
+                        logger.error(output[1])
+
+                    self._set_info(database,table)
+        finally:
+            if outputFile:
                 try:
-                    p.terminate()
+                    outputFile.close()
                 except:
                     pass
+            if errorFile:
+                try:
+                    errorFile.close()
+                except:
+                    pass
+            try:
+                os.remove(outputFile.name)
+            except:
+                pass
+            try:
+                os.remove(errorFile.name)
+            except:
+                pass
 
-            returncode = p.wait()
-            output = p.communicate()
-            if returncode != signal.SIGTERM * -1 and output[1].strip():
-                raise Exception(output[1])
 
-        else:
-            sleep_time = 0
-            cancel_time = BorgConfiguration.IMPORT_CANCEL_TIME * 1000
-            from harvest.jobstates import JobStateOutcome
-            cancelled = False
-            while True:
-                if p.poll() is not None:
-                    break;
-                time.sleep(0.2)
-                sleep_time += 200
-                if sleep_time >= cancel_time:
-                    sleep_time = 0
-                    job = self._get_job(cursor,job_id)
-                    if job.user_action and job.user_action.lower() == JobStateOutcome.cancelled_by_custodian.lower():
-                        #job cancelled
-                        try:
-                            p.terminate()
-                        except:
-                            pass
-                        cancelled = True
-                        logger.info("The job({1}) is cancelled, terminate the importing process for '{0}'".format(self.name,job_id))
-                        break;
-
-            returncode = p.wait()
-            output = p.communicate()
-            if cancelled:
-                #clear the user action
-                job.user_action = None
-                self._save_job(cursor,job,["user_action"])
-            else:
-                if p.returncode != 0:
-                    if output[1].strip() :
-                        raise Exception(output[1])
-                    else:
-                        raise Exception("ogr2ogr failed with unknown exception")
-                self._set_info(database,table)
-
-        return not cancelled
+        return (not cancelled,output[1] if output and output[1].strip() else None)
 
     @switch_searchpath(searchpath=BorgConfiguration.BORG_SCHEMA)
     def _get_job(self,cursor,job_id):
@@ -1149,12 +1185,18 @@ class Input(JobFields,SpatialTableMixin):
 
     @in_schema(BorgConfiguration.INPUT_SCHEMA)
     def execute(self,job_id ,cursor,schema):
+        from harvest.jobstates import JobStateOutcome
         begin_time = timezone.now()
-        if self.invoke(cursor,schema,job_id):
+        result = self.invoke(cursor,schema,job_id)
+        if result[0]:
             # all data is imported
             self.job_run_time = begin_time
             #save the latest data source information to table
             self._post_execute(cursor)
+            if result[1] and result[1].lower().find("error") >= 0 :
+                return (JobStateOutcome.warning,result[1])
+            else:
+                return (JobStateOutcome.succeed,result[1])
         else:
             #import process is cancelled
             from harvest.jobstates import JobStateOutcome

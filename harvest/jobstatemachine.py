@@ -10,8 +10,8 @@ from django.core.files import File
 
 from tablemanager.models import Publish, Workspace
 from harvest.models import Job,JobLog
-from harvest.jobstates import JobStateOutcome,Failed,Completed,JobState
-from harvest.harveststates import Waiting
+from harvest.jobstates import JobStateOutcome,Failed,Completed,JobState,CompletedWithWarning
+from harvest.harveststates import HarvestStateOutcome,Waiting
 from borg_utils.jobintervals import JobInterval
 from borg_utils.borg_config import BorgConfiguration
 
@@ -70,7 +70,7 @@ class JobStatemachine(object):
         with transaction.atomic():
             if publish.waiting > 0:
                 #already have one waiting harvest job, create another is meanless.
-                return;
+                return (False,"Already have one waiting job")
 
             publish.waiting = models.F("waiting") + 1
             job = Job(
@@ -195,10 +195,11 @@ class JobStatemachine(object):
         failed_jobs = 0
         ignored_jobs = 0
         error_jobs = 0
-        for j in Job.objects.exclude(state__in = [Failed.instance().name,Completed.instance().name]).order_by('id'):
+        is_shutdown = False
+        for j in Job.objects.exclude(state__in = [Failed.instance().name,Completed.instance().name,CompletedWithWarning.instance().name]).order_by('id'):
             try:
-                JobStatemachine.run(j,first_run)
-                if j.state == "Completed":
+                is_shutdown = not JobStatemachine.run(j,first_run)
+                if j.state in ["Completed","CompletedWithWarning"]:
                     if j.launched is None:
                         ignored_jobs += 1
                     else:
@@ -210,8 +211,10 @@ class JobStatemachine(object):
             except:
                 logger.error("job(id={0},name={1}) runs into a exception{2}".format(j.id,j.publish.name,JobState.get_exception_message()))
                 error_jobs += 1
+            if is_shutdown:
+                break
 
-        return (succeed_jobs,failed_jobs,ignored_jobs,error_jobs)
+        return [is_shutdown,(succeed_jobs,failed_jobs,ignored_jobs,error_jobs)]
 
     @staticmethod
     def run_job(job_id,step=False):
@@ -219,6 +222,9 @@ class JobStatemachine(object):
 
     @staticmethod
     def run(job,first_run=True,step=False):
+        """
+            return True if user doesn't request shutdown, otherwise return False
+        """
         current_state = JobState.get_jobstate(job.state)
 
         previous_state = None
@@ -233,7 +239,7 @@ class JobStatemachine(object):
             if current_state.is_end_state:
                 #current job is already finished.
                 logger.debug("job(id={0},name={1},state={2}) is finished".format(job.id,job.publish.name,job.state))
-                return
+                return True
             elif job.user_action and ((job.user_action == JobStateOutcome.cancelled_by_custodian and current_state.cancellable) or (job.user_action != JobStateOutcome.cancelled_by_custodian)):
                 #have a pending user action.
                 if not current_state.outcome_cls.is_manual_outcome(job.user_action):
@@ -252,13 +258,13 @@ class JobStatemachine(object):
                         state_result = (JobStateOutcome.internal_error, "The action '{0}' can not apply on the current state({1}).".format(job.user_action,current_state.name))
             elif current_state.is_interactive_state:
                 #job is at interactive state, but no user action is requested, return and wait user action.
-                return
+                return True
             elif current_state.is_error_state:
                 #wait the configured interval before continue
                 try:
                     if not first_run and job.last_execution_end_time and timezone.now() < job.last_execution_end_time + timedelta(seconds=BorgConfiguration.RETRY_INTERVAL):
                         #early than the next execution time. can not run this time
-                        return
+                        return True
                     else:
                         state_result = current_state.execute(job,previous_state)
                 except:
@@ -378,11 +384,11 @@ class JobStatemachine(object):
             if current_state == next_state:
                 #stay in the same state, stop execution
                 logger.debug("job(id={0},name={1},state={2}) stay in the same state.".format(job.id,job.publish.name,job.state))
-                return
+                return state_result[0] != HarvestStateOutcome.shutdown
             elif next_state.is_error_state:
-                return
+                return state_result[0] != HarvestStateOutcome.shutdown
             elif step:
-                return
+                return state_result[0] != HarvestStateOutcome.shutdown
 
             #set previous_state to the current state, current_state to the next_state
             previous_state = JobState.get_jobstate(job.previous_state)
