@@ -4,7 +4,7 @@ import logging
 
 from tablemanager.models import Publish,Input,Normalise
 from harvest.models import Job
-from harvest.jobstates import Completed
+from harvest.jobstates import Completed,CompletedWithWarning
 
 class HarvestJobCleaner(object):
     """
@@ -33,7 +33,7 @@ class HarvestJobCleaner(object):
             #get the earlist job which should be kept.
             earliest_job = None
             try:
-                earliest_job = p.job_set.filter(state=Completed.instance().name,launched__isnull=False).order_by('-finished')[self.min_jobs - 1]    
+                earliest_job = p.job_set.filter(state__in=[Completed.instance().name,CompletedWithWarning.instance().name],launched__isnull=False).order_by('-finished')[self.min_jobs - 1]    
             except IndexError:
                 #the number of existing jobs is less than min_jobs, no need to clean jobs.
                 continue

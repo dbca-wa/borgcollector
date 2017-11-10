@@ -4,7 +4,7 @@ from harvest.models import (
     Job, JobLog,Process
 )
 from borg.admin import site
-from harvest.jobstates import JobState,JobStateOutcome,Failed,Completed
+from harvest.jobstates import JobState,JobStateOutcome,Failed,Completed,CompletedWithWarning
 from harvest.harveststates import Waiting
 
 
@@ -70,7 +70,7 @@ class JobAdmin(admin.ModelAdmin):
     job_logs.short_description = "Logs"
 
     def sync_status(self,o):
-        if o.state == Completed.instance().name and o.launched:
+        if o.state in [Completed.instance().name,CompletedWithWarning.instance().name] and o.launched:
             return "<a href='/monitor/publishsyncstatus/?q={0}'>Sync status</a>".format(o.id)
         else:
             return ""
@@ -100,7 +100,7 @@ class FailingJob(Job):
 class RunningJobAdmin(JobAdmin):
     def get_queryset(self,request):
         qs = super(RunningJobAdmin,self).get_queryset(request)
-        return qs.exclude(state__in = [Failed.instance().name,Completed.instance().name])
+        return qs.exclude(state__in = [Failed.instance().name,Completed.instance().name,CompletedWithWarning.instance().name])
 
 class RunningJob(Job):
     class Meta:
@@ -111,7 +111,7 @@ class RunningJob(Job):
 class EffectiveJobAdmin(JobAdmin):
     def get_queryset(self,request):
         qs = super(EffectiveJobAdmin,self).get_queryset(request)
-        return qs.exclude(state__in = [Failed.instance().name,Completed.instance().name],launched=None)
+        return qs.exclude(state__in = [Failed.instance().name,Completed.instance().name,CompletedWithWarning.instance().name],launched=None)
 
 class EffectiveJob(Job):
     class Meta:
