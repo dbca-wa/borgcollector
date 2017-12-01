@@ -257,42 +257,55 @@ class LayerGroup(models.Model,ResourceStatusMixin,TransactionMixin):
         if res.status_code != 404:
             res.raise_for_status()
 
-        json_filename = self.json_filename_abs('unpublish');
+        publish_file = self.json_filename_abs('publish')
+        publish_json = None
+        if os.path.exists(publish_file):
+            with open(publish_file,"r") as f:
+                publish_json = json.loads(f.read())
+        else:
+            publish_json = {}
+
+        json_file = self.json_filename_abs('unpublish');
+        json_out = None
 
         try_set_push_owner("layergroup")
         hg = None
         try:
-            meta_data = {}
-            #add extra data to meta data
-            meta_data["workspace"] = self.workspace.name
-            meta_data["name"] = self.name
-            meta_data["native_name"] = self.name
-            meta_data["auth_level"] = self.workspace.auth_level
-            meta_data["spatial_data"] = True
+            if publish_json.get("action","publish") != "remove":
+                json_out = {}
+                json_out["name"] = self.name
+                json_out["workspace"] = self.workspace.name
 
-            meta_data["channel"] = self.workspace.publish_channel.name
-            meta_data["sync_geoserver_data"] = self.workspace.publish_channel.sync_geoserver_data
+                json_out["spatial_data"] = True
+                json_out["channel"] = self.workspace.publish_channel.name
+                json_out["sync_geoserver_data"] = self.workspace.publish_channel.sync_geoserver_data
 
-            #write meta data file
-            file_name = "{}.meta.json".format(self.name)
-            meta_file = os.path.join(BorgConfiguration.UNPUBLISH_DIR,self.workspace.publish_channel.name,self.workspace.name,"layergroups",file_name)
-            #create the dir if required
-            if not os.path.exists(os.path.dirname(meta_file)):
-                os.makedirs(os.path.dirname(meta_file))
+                json_out['action'] = "remove"
 
-            with open(meta_file,"wb") as output:
-                json.dump(meta_data, output, indent=4)
+                #retrieve meta data from the last publish task
+                meta_json = publish_json
+                if "meta" in publish_json and "file" in publish_json["meta"]:
+                    meta_file = publish_json["meta"]["file"][len(BorgConfiguration.MASTER_PATH_PREFIX):]
+                    if os.path.exists(meta_file):
+                        with open(meta_file,"r") as f:
+                            meta_json = json.loads(f.read())
+                    else:
+                        meta_json = {}
+    
+                for key in ["name","workspace","channel","spatial_data","sync_geoserver_data"]:
+                    if key in meta_json:
+                        json_out[key] = meta_json[key]
+                
+            else:
+                json_out = publish_json
 
-            json_out = {}
-            json_out['meta'] = {"file":"{}{}".format(BorgConfiguration.MASTER_PATH_PREFIX, meta_file),"md5":file_md5(meta_file)}
-            json_out['action'] = "remove"
             json_out["remove_time"] = timezone.localtime(timezone.now()).strftime("%Y-%m-%d %H:%M:%S.%f")
-        
-            #create the dir if required
-            if not os.path.exists(os.path.dirname(json_filename)):
-                os.makedirs(os.path.dirname(json_filename))
 
-            with open(json_filename, "wb") as output:
+            #create the dir if required
+            if not os.path.exists(os.path.dirname(json_file)):
+                os.makedirs(os.path.dirname(json_file))
+
+            with open(json_file, "wb") as output:
                 json.dump(json_out, output, indent=4)
         
             hg = hglib.open(BorgConfiguration.BORG_STATE_REPOSITORY)
@@ -304,7 +317,7 @@ class LayerGroup(models.Model,ResourceStatusMixin,TransactionMixin):
             if json_files:
                 hg.remove(files=json_files)
 
-            json_files.append(json_filename)
+            json_files.append(json_file)
             hg.commit(include=json_files, user="borgcollector",addremove=True, message="Unpublish layer group {}.{}".format(self.workspace.name, self.name))
             increase_committed_changes()
                 

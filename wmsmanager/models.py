@@ -297,38 +297,55 @@ class WmsServer(models.Model,ResourceStatusMixin,TransactionMixin):
         return os.path.join(BorgConfiguration.BORG_STATE_REPOSITORY, self.json_filename(action))
 
     def unpublish(self):
+        publish_file = self.json_filename_abs('publish')
+        publish_json = None
+        if os.path.exists(publish_file):
+            with open(publish_file,"r") as f:
+                publish_json = json.loads(f.read())
+        else:
+            publish_json = {}
+
+        json_file = self.json_filename_abs('unpublish');
+        json_out = None
         try_set_push_owner("wmsserver")
         hg = None
         try:
-            meta_data = {}
-            meta_data["name"] = self.name
-            meta_data["workspace"] = self.workspace.name
-        
-            #write meta data file
-            file_name = "{}.meta.json".format(self.name)
-            meta_file = os.path.join(BorgConfiguration.UNPUBLISH_DIR,self.workspace.publish_channel.name,self.workspace.name,"stores",file_name)
-            #create the dir if required
-            if not os.path.exists(os.path.dirname(meta_file)):
-                os.makedirs(os.path.dirname(meta_file))
+            if publish_json.get("action","publish") != "remove":
+                json_out = {}
+                json_out["name"] = self.name
+                json_out["workspace"] = self.workspace.name
+                json_out["channel"] = self.workspace.publish_channel.name
 
-            with open(meta_file,"wb") as output:
-                json.dump(meta_data, output, indent=4)
+                json_out['action'] = 'remove'
+                json_out["sync_geoserver_data"] = self.workspace.publish_channel.sync_geoserver_data
 
-            json_out = {}
-            json_out['meta'] = {"file":"{}{}".format(BorgConfiguration.MASTER_PATH_PREFIX, meta_file),"md5":file_md5(meta_file)}
-            json_out['action'] = 'remove'
+                #retrieve meta data from the last published task
+                meta_json = publish_json
+                if "meta" in publish_json and "file" in publish_json["meta"]:
+                    meta_file = publish_json["meta"]["file"][len(BorgConfiguration.MASTER_PATH_PREFIX):]
+                    if os.path.exists(meta_file):
+                        with open(meta_file,"r") as f:
+                            meta_json = json.loads(f.read())
+                    else:
+                        meta_json = {}
+    
+                for key in ["name","workspace","channel","sync_geoserver_data"]:
+                    if key in meta_json:
+                        json_out[key] = meta_json[key]
+            else:
+                json_out = publish_json
+                
             json_out["remove_time"] = timezone.localtime(timezone.now()).strftime("%Y-%m-%d %H:%M:%S.%f")
         
-            json_filename = self.json_filename_abs('unpublish');
             #create the dir if required
-            if not os.path.exists(os.path.dirname(json_filename)):
-                os.makedirs(os.path.dirname(json_filename))
+            if not os.path.exists(os.path.dirname(json_file)):
+                os.makedirs(os.path.dirname(json_file))
 
-            with open(json_filename, "wb") as output:
+            with open(json_file, "wb") as output:
                 json.dump(json_out, output, indent=4)
         
             hg = hglib.open(BorgConfiguration.BORG_STATE_REPOSITORY)
-            hg.commit(include=[json_filename],addremove=True, user="borgcollector", message="Unpublish wms store {}.{}".format(self.workspace.name, self.name))
+            hg.commit(include=[json_file],addremove=True, user="borgcollector", message="Unpublish wms store {}.{}".format(self.workspace.name, self.name))
             increase_committed_changes()
                 
             try_push_to_repository("wmsserver",hg)
@@ -346,9 +363,12 @@ class WmsServer(models.Model,ResourceStatusMixin,TransactionMixin):
             meta_data = {}
             meta_data["name"] = self.name
             meta_data["capability_url"] = self.get_capability_url
+            meta_data["channel"] = self.workspace.publish_channel.name
             meta_data["username"] = self.user or ""
             meta_data["password"] = self.password or ""
             meta_data["workspace"] = self.workspace.name
+
+            meta_data["sync_geoserver_data"] = self.workspace.publish_channel.sync_geoserver_data
         
             if self.geoserver_setting:
                 meta_data["geoserver_setting"] = json.loads(self.geoserver_setting)
@@ -551,42 +571,55 @@ class WmsLayer(models.Model,ResourceStatusMixin,TransactionMixin):
         if res.status_code != 404:
             res.raise_for_status()
 
-        json_filename = self.json_filename_abs('unpublish');
+        publish_file = self.json_filename_abs('publish')
+        publish_json = None
+        if os.path.exists(publish_file):
+            with open(publish_file,"r") as f:
+                publish_json = json.loads(f.read())
+        else:
+            publish_json = {}
+
+        json_file = self.json_filename_abs('unpublish');
+        json_out = None
         try_set_push_owner("wmslayer")
         hg = None
         try:
-            meta_data = {}
-            #add extra data to meta data
-            meta_data["workspace"] = self.server.workspace.name
-            meta_data["name"] = self.kmi_name
-            meta_data["native_name"] = self.name
-            meta_data["store"] = self.server.name
-            meta_data["auth_level"] = self.server.workspace.auth_level
-            meta_data["spatial_data"] = True
+            if publish_json.get("action","publish") != "remove":
+                json_out = {}
+                json_out["name"] = self.kmi_name
+                json_out["workspace"] = self.server.workspace.name
+                json_out["store"] = self.server.name
+                json_out["spatial_data"] = True
+    
+                json_out["channel"] = self.server.workspace.publish_channel.name
+                json_out["sync_geoserver_data"] = self.server.workspace.publish_channel.sync_geoserver_data
+    
+                json_out['action'] = "remove"
 
-            meta_data["channel"] = self.server.workspace.publish_channel.name
-            meta_data["sync_geoserver_data"] = self.server.workspace.publish_channel.sync_geoserver_data
+                #retrieve meta data from the last publish task
+                meta_json = publish_json
+                if "meta" in publish_json and "file" in publish_json["meta"]:
+                    meta_file = publish_json["meta"]["file"][len(BorgConfiguration.MASTER_PATH_PREFIX):]
+                    if os.path.exists(meta_file):
+                        with open(meta_file,"r") as f:
+                            meta_json = json.loads(f.read())
+                    else:
+                        meta_json = {}
+    
+                for key in ["name","workspace","store","channel","spatial_data","sync_geoserver_data"]:
+                    if key in meta_json:
+                        json_out[key] = meta_json[key]
+                
+            else:
+                json_out = publish_json
 
-            #write meta data file
-            file_name = "{}.meta.json".format(self.kmi_name)
-            meta_file = os.path.join(BorgConfiguration.UNPUBLISH_DIR,self.server.workspace.publish_channel.name,self.server.workspace.name,"layers",file_name)
-            #create the dir if required
-            if not os.path.exists(os.path.dirname(meta_file)):
-                os.makedirs(os.path.dirname(meta_file))
-
-            with open(meta_file,"wb") as output:
-                json.dump(meta_data, output, indent=4)
-
-            json_out = {}
-            json_out['meta'] = {"file":"{}{}".format(BorgConfiguration.MASTER_PATH_PREFIX, meta_file),"md5":file_md5(meta_file)}
-            json_out['action'] = "remove"
             json_out["remove_time"] = timezone.localtime(timezone.now()).strftime("%Y-%m-%d %H:%M:%S.%f")
         
             #create the dir if required
-            if not os.path.exists(os.path.dirname(json_filename)):
-                os.makedirs(os.path.dirname(json_filename))
+            if not os.path.exists(os.path.dirname(json_file)):
+                os.makedirs(os.path.dirname(json_file))
 
-            with open(json_filename, "wb") as output:
+            with open(json_file, "wb") as output:
                 json.dump(json_out, output, indent=4)
         
             hg = hglib.open(BorgConfiguration.BORG_STATE_REPOSITORY)
@@ -598,7 +631,7 @@ class WmsLayer(models.Model,ResourceStatusMixin,TransactionMixin):
             if json_files:
                 hg.remove(files=json_files)
 
-            json_files.append(json_filename)
+            json_files.append(json_file)
             hg.commit(include=json_files,addremove=True, user="borgcollector", message="unpublish wms layer {}.{}".format(self.server.workspace.name, self.name))
             increase_committed_changes()
                 

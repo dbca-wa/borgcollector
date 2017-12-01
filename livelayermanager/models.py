@@ -181,39 +181,57 @@ class Datasource(BorgModel,ResourceStatusMixin,TransactionMixin):
         return os.path.join(BorgConfiguration.BORG_STATE_REPOSITORY, self.json_filename(action))
 
     def unpublish(self):
+        publish_file = self.json_filename_abs('publish')
+        publish_json = None
+        if os.path.exists(publish_file):
+            with open(publish_file,"r") as f:
+                publish_json = json.loads(f.read())
+        else:
+            publish_json = {}
+
+        json_file = self.json_filename_abs('unpublish');
+        json_out = None
         try_set_push_owner("liveserver")
         hg = None
-        try:
-            meta_data = {}
-            meta_data["name"] = self.name
-            meta_data["schema"] = self.schema
-            meta_data["workspace"] = self.workspace.name
-        
-            #write meta data file
-            file_name = "{}.meta.json".format(self.name)
-            meta_file = os.path.join(BorgConfiguration.UNPUBLISH_DIR,self.workspace.publish_channel.name,self.workspace.name,"stores",file_name)
-            #create the dir if required
-            if not os.path.exists(os.path.dirname(meta_file)):
-                os.makedirs(os.path.dirname(meta_file))
+        try: 
+            if publish_json.get("action","publish") != "remove":
+                json_out = {}
+                json_out["name"] = self.name
+                json_out["workspace"] = self.workspace.name
+            
+                json_out["channel"] = self.workspace.publish_channel.name
+                json_out["sync_geoserver_data"] = self.workspace.publish_channel.sync_geoserver_data
+            
+                json_out['action'] = 'remove'
 
-            with open(meta_file,"wb") as output:
-                json.dump(meta_data, output, indent=4)
+                #retrieve meta data from the last publish task
+                meta_json = publish_json
+                if "meta" in publish_json and "file" in publish_json["meta"]:
+                    meta_file = publish_json["meta"]["file"][len(BorgConfiguration.MASTER_PATH_PREFIX):]
+                    if os.path.exists(meta_file):
+                        with open(meta_file,"r") as f:
+                            meta_json = json.loads(f.read())
+                    else:
+                        meta_json = {}
+    
+                for key in ["name","workspace","channel","sync_geoserver_data"]:
+                    if key in meta_json:
+                        json_out[key] = meta_json[key]
+                
+            else:
+                json_out = publish_josn
 
-            json_out = {}
-            json_out['meta'] = {"file":"{}{}".format(BorgConfiguration.MASTER_PATH_PREFIX, meta_file),"md5":file_md5(meta_file)}
-            json_out['action'] = 'remove'
             json_out["remove_time"] = timezone.localtime(timezone.now()).strftime("%Y-%m-%d %H:%M:%S.%f")
         
-            json_filename = self.json_filename_abs('unpublish');
             #create the dir if required
-            if not os.path.exists(os.path.dirname(json_filename)):
-                os.makedirs(os.path.dirname(json_filename))
+            if not os.path.exists(os.path.dirname(json_file)):
+                os.makedirs(os.path.dirname(json_file))
 
-            with open(json_filename, "wb") as output:
+            with open(json_file, "wb") as output:
                 json.dump(json_out, output, indent=4)
         
             hg = hglib.open(BorgConfiguration.BORG_STATE_REPOSITORY)
-            hg.commit(include=[json_filename],addremove=True, user="borgcollector", message="Unpublish live store {}.{}".format(self.workspace.name, self.name))
+            hg.commit(include=[json_file],addremove=True, user="borgcollector", message="Unpublish live store {}.{}".format(self.workspace.name, self.name))
             increase_committed_changes()
                 
             try_push_to_repository("liveserver",hg)
@@ -237,6 +255,8 @@ class Datasource(BorgModel,ResourceStatusMixin,TransactionMixin):
             meta_data["passwd"] = self.password
             meta_data["schema"] = self.schema
             meta_data["workspace"] = self.workspace.name
+            meta_data["channel"] = self.workspace.publish_channel.name
+            meta_data["sync_geoserver_data"] = self.workspace.publish_channel.sync_geoserver_data
         
             if self.geoserver_setting:
                 meta_data["geoserver_setting"] = json.loads(self.geoserver_setting)
@@ -476,44 +496,63 @@ class Layer(BorgModel,ResourceStatusMixin,TransactionMixin,SpatialTableMixin):
 
     def unpublish(self):
         #use published meta file as the meta file for unpublish
-        json_file = self.json_filename_abs('publish')
-        if not os.path.exists(json_file):
-            raise Exception("Can't find the publish json file({}) in repository.".format(self.json_filename('publish')))
+        publish_file = self.json_filename_abs('publish')
+        publish_json = None
+        if os.path.exists(publish_file):
+            with open(publish_file,"r") as f:
+                publish_json = json.loads(f.read())
+        else:
+            publish_json = {}
 
+        json_file = self.json_filename_abs('unpublish');
         json_out = None
-        with open(json_file,"r") as f:
-            json_out = json.loads(f.read())
 
-        if "meta" not in json_out or "file" not in json_out["meta"]:
-            raise Exception("Can't find meta file in the publish json file({})".format(self.json_filename('publish')))
-
-        published_meta_file = json_out["meta"]["file"][len(BorgConfiguration.MASTER_PATH_PREFIX):]
-        if not os.path.exists(published_meta_file):
-            raise Exception("Published meta file({}) is missing.".format(published_meta_file))
-
-        file_name = "{}.meta.json".format(self.kmi_name)
-        meta_file = os.path.join(BorgConfiguration.UNPUBLISH_DIR,self.datasource.workspace.publish_channel.name,self.datasource.workspace.name,"layers",file_name)
-
-        if not os.path.exists(os.path.dirname(meta_file)):
-            os.makedirs(os.path.dirname(meta_file))
-
-        shutil.copyfile(published_meta_file,meta_file)
-
-        #remove it from catalogue service
         #remove it from catalogue service
         res = requests.delete("{}/catalogue/api/records/{}:{}/".format(settings.CSW_URL,self.datasource.workspace.name,self.kmi_name),auth=(settings.CSW_USER,settings.CSW_PASSWORD))
         if res.status_code != 404:
             res.raise_for_status()
 
-        json_filename = self.json_filename_abs('unpublish');
         try_set_push_owner("livelayer")
         hg = None
         try:
-            json_out['meta'] = {"file":"{}{}".format(BorgConfiguration.MASTER_PATH_PREFIX, meta_file),"md5":file_md5(meta_file)}
-            json_out['action'] = "remove"
+            if publish_json.get("action","publish") != "remove":
+                json_out = {}
+                json_out["name"] = self.kmi_name
+                json_out["workspace"] = self.datasource.workspace.name
+
+                json_out["spatial_data"] = self.is_spatial
+                json_out["channel"] = self.datasource.workspace.publish_channel.name
+                json_out["sync_geoserver_data"] = self.datasource.workspace.publish_channel.sync_geoserver_data
+
+                json_out['action'] = "remove"
+
+                #retrieve meta data from the last publish task
+                meta_json = publish_json
+                if "meta" in publish_json and "file" in publish_json["meta"]:
+                    meta_file = publish_json["meta"]["file"][len(BorgConfiguration.MASTER_PATH_PREFIX):]
+                    if os.path.exists(meta_file):
+                        with open(meta_file,"r") as f:
+                            meta_json = json.loads(f.read())
+                    else:
+                        meta_json = {}
+    
+                for key,value in meta_json.get("styles",{}).iteritems():
+                    json_out["styles"][key] = {"default":value.get("default",False)}
+    
+                for key in ["name","workspace","channel","spatial_data","sync_geoserver_data"]:
+                    if key in meta_json:
+                        json_out[key] = meta_json[key]
+                
+            else:
+                json_out = publish_json
+
             json_out["remove_time"] = timezone.localtime(timezone.now()).strftime("%Y-%m-%d %H:%M:%S.%f")
         
-            with open(json_filename, "wb") as output:
+            #create the dir if required
+            if not os.path.exists(os.path.dirname(json_file)):
+                os.makedirs(os.path.dirname(json_file))
+
+            with open(json_file, "wb") as output:
                 json.dump(json_out, output, indent=4)
         
             hg = hglib.open(BorgConfiguration.BORG_STATE_REPOSITORY)
@@ -525,7 +564,7 @@ class Layer(BorgModel,ResourceStatusMixin,TransactionMixin,SpatialTableMixin):
             if json_files:
                 hg.remove(files=json_files)
 
-            json_files.append(json_filename)
+            json_files.append(json_file)
             hg.commit(include=json_files,addremove=True, user="borgcollector", message="unpublish live layer {}.{}".format(self.datasource.workspace.name, self.kmi_name))
             increase_committed_changes()
                 
@@ -836,44 +875,62 @@ class SqlViewLayer(BorgModel,ResourceStatusMixin,TransactionMixin,SpatialTableMi
 
     def unpublish(self):
         #use published meta file as the meta file for unpublish
-        json_file = self.json_filename_abs('publish')
-        if not os.path.exists(json_file):
-            raise Exception("Can't find the publish json file({}) in repository.".format(self.json_filename('publish')))
+        publish_file = self.json_filename_abs('publish')
+        publish_json = None
+        if os.path.exists(publish_file):
+            with open(publish_file,"r") as f:
+                publish_json = json.loads(f.read())
+        else:
+            publish_json = {}
 
+        json_file = self.json_filename_abs('unpublish');
         json_out = None
-        with open(json_file,"r") as f:
-            json_out = json.loads(f.read())
 
-        if "meta" not in json_out or "file" not in json_out["meta"]:
-            raise Exception("Can't find meta file in the publish json file({})".format(self.json_filename('publish')))
-
-        published_meta_file = json_out["meta"]["file"][len(BorgConfiguration.MASTER_PATH_PREFIX):]
-        if not os.path.exists(published_meta_file):
-            raise Exception("Published meta file({}) is missing.".format(published_meta_file))
-
-        file_name = "{}.meta.json".format(self.kmi_name)
-        meta_file = os.path.join(BorgConfiguration.UNPUBLISH_DIR,self.datasource.workspace.publish_channel.name,self.datasource.workspace.name,"layers",file_name)
-
-        if not os.path.exists(os.path.dirname(meta_file)):
-            os.makedirs(os.path.dirname(meta_file))
-
-        shutil.copyfile(published_meta_file,meta_file)
-
-        #remove it from catalogue service
         #remove it from catalogue service
         res = requests.delete("{}/catalogue/api/records/{}:{}/".format(settings.CSW_URL,self.datasource.workspace.name,self.kmi_name),auth=(settings.CSW_USER,settings.CSW_PASSWORD))
         if res.status_code != 404:
             res.raise_for_status()
 
-        json_filename = self.json_filename_abs('unpublish');
-        try_set_push_owner("livelayer")
         hg = None
         try:
-            json_out['meta'] = {"file":"{}{}".format(BorgConfiguration.MASTER_PATH_PREFIX, meta_file),"md5":file_md5(meta_file)}
-            json_out['action'] = "remove"
+            if publish_json.get("action","publish") != "remove":
+                json_out = {}
+                json_out["name"] = self.kmi_name
+                json_out["workspace"] = self.datasource.workspace.name
+
+                json_out["spatial_data"] = self.is_spatial
+                json_out["channel"] = self.datasource.workspace.publish_channel.name
+                json_out["sync_geoserver_data"] = self.datasource.workspace.publish_channel.sync_geoserver_data
+
+                json_out['action'] = "remove"
+
+                #retrieve meta data from the last publish task
+                meta_json = publish_json
+                if "meta" in publish_json and "file" in publish_json["meta"]:
+                    meta_file = publish_json["meta"]["file"][len(BorgConfiguration.MASTER_PATH_PREFIX):]
+                    if os.path.exists(meta_file):
+                        with open(meta_file,"r") as f:
+                            meta_json = json.loads(f.read())
+                    else:
+                        meta_json = {}
+    
+                for key,value in meta_json.get("styles",{}).iteritems():
+                    json_out["styles"][key] = {"default":value.get("default",False)}
+    
+                for key in ["name","workspace","channel","spatial_data","sync_geoserver_data"]:
+                    if key in meta_json:
+                        json_out[key] = meta_json[key]
+                
+            else:
+                json_out = publish_json
+
             json_out["remove_time"] = timezone.localtime(timezone.now()).strftime("%Y-%m-%d %H:%M:%S.%f")
         
-            with open(json_filename, "wb") as output:
+            #create the dir if required
+            if not os.path.exists(os.path.dirname(json_file)):
+                os.makedirs(os.path.dirname(json_file))
+
+            with open(json_file, "wb") as output:
                 json.dump(json_out, output, indent=4)
         
             hg = hglib.open(BorgConfiguration.BORG_STATE_REPOSITORY)
@@ -885,7 +942,7 @@ class SqlViewLayer(BorgModel,ResourceStatusMixin,TransactionMixin,SpatialTableMi
             if json_files:
                 hg.remove(files=json_files)
 
-            json_files.append(json_filename)
+            json_files.append(json_file)
             hg.commit(include=json_files,addremove=True, user="borgcollector", message="unpublish live layer {}.{}".format(self.datasource.workspace.name, self.kmi_name))
             increase_committed_changes()
                 
