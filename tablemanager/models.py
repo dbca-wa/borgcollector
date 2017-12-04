@@ -873,11 +873,15 @@ class Input(JobFields,SpatialTableMixin):
         return the data source's layer name
         """
         if hasattr(self, "_layer_name"): return self._layer_name
-        output = subprocess.check_output(["ogrinfo", "-q", "-ro", self.vrt.name], stderr=subprocess.STDOUT)
+        output = subprocess.check_output(["ogrinfo", "-q", "-ro","-so","-al", self.vrt.name], stderr=subprocess.STDOUT)
         if output.find("ERROR") > -1:
-            raise Exception(l)
+            raise Exception(output)
         else:
-            self._layer_name = output.replace("1: ", "").split(" (")[0].strip()
+            m = self._layer_name_re.search(output)
+            if m:
+                self._layer_name = m.group("layerName")
+            else:
+                raise Exception("Failed to find layer name")
             return self._layer_name
 
     def insert_fields(self):
@@ -1002,7 +1006,7 @@ class Input(JobFields,SpatialTableMixin):
             raise ValidationError(e)
     
 
-    _layer_name_re = re.compile('Layer name: [^\n]*\n')
+    _layer_name_re = re.compile('Layer name: (?P<layerName>[^\n]+)')
     def _set_info(self,database=None,table=None):
         """
         set the data source's information dictionary
@@ -1044,7 +1048,6 @@ class Input(JobFields,SpatialTableMixin):
         Return True if import successfully; False if import process is terminated.
         """
         validation = not job_id
-
         # Make sure DB is GIS enabled and then load using ogr2ogr
         database = "PG:dbname='{NAME}' host='{HOST}' port='{PORT}'  user='{USER}' password='{PASSWORD}'".format(**settings.DATABASES["default"])
         table = "{0}.{1}".format(schema,self.name)
@@ -2320,10 +2323,11 @@ class Publish(Transform,ResourceStatusMixin,SpatialTableMixin):
             publish_json = {}
 
         json_file = self.output_filename_abs('unpublish')
-        json_out = {}
+        json_out = None
 
         if publish_json.get("action","publish") != "remove":
             #require the properties ("name", "workspace","schema","data_schema","outdated_schema","action","styles", "channel", "spatial_data", "sync_postgres_data", "sync_geoserver_data") to unpublish
+            json_out = {}
             json_out["name"] = self.table_name
             json_out["workspace"] = self.workspace.name
             json_out["schema"] = self.workspace.publish_schema
@@ -2624,7 +2628,17 @@ class Publish(Transform,ResourceStatusMixin,SpatialTableMixin):
             if 400 <= res.status_code < 600 and res.content:
                 res.reason = "{}({})".format(res.reason,res.content)
             res.raise_for_status()
-            meta_data = res.json()
+            try:
+                meta_data = res.json()
+            except:
+                res.status_code = 400
+                if res.content.find("microsoft") >= 0:
+                    res.status_code = 401
+                    res.reason = "Please login"
+                else:
+                    res.status_code = 400
+                    res.reason = "Unknown reason"
+                res.raise_for_status()
             #process styles
             styles = meta_data.get("styles",[])
             #filter out qml and lyr styles
