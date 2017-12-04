@@ -16,7 +16,7 @@ logger = logging.getLogger(__name__)
 try:
     shared_cache = caches["shared"]
 except:
-    logger.warning("Inter-process communication is disabled because redis cache is not configured properly.\n{0}".format(traceback.format_exc()))
+    logger.warning("Inter-process communication is disabled because uwsgi cache is not configured properly.\n{0}".format(traceback.format_exc()))
 
 class CachedModelChoiceField(forms.ModelChoiceField):
     """
