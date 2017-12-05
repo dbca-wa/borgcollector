@@ -509,7 +509,16 @@ class WmsLayer(models.Model,ResourceStatusMixin,TransactionMixin):
         if 400 <= res.status_code < 600 and res.content:
             res.reason = "{}({})".format(res.reason,res.content)
         res.raise_for_status()
-        meta_data = res.json()
+        try:
+            meta_data = res.json()
+        except:
+            if res.content.find("microsoft") >= 0:
+                res.status_code = 401
+                res.reason = "Please login"
+            else:
+                res.status_code = 400
+                res.reason = "Unknown reason"
+            res.raise_for_status()
 
         #add extra data to meta data
         meta_data["workspace"] = self.server.workspace.name

@@ -228,7 +228,16 @@ class LayerGroup(models.Model,ResourceStatusMixin,TransactionMixin):
         if 400 <= res.status_code < 600 and res.content:
             res.reason = "{}({})".format(res.reason,res.content)
         res.raise_for_status()
-        meta_data = res.json()
+        try:
+            meta_data = res.json()
+        except:
+            if res.content.find("microsoft") >= 0:
+                res.status_code = 401
+                res.reason = "Please login"
+            else:
+                res.status_code = 400
+                res.reason = "Unknown reason"
+            res.raise_for_status()
 
         #add extra data to meta data
         meta_data["workspace"] = self.workspace.name
@@ -341,7 +350,7 @@ class LayerGroup(models.Model,ResourceStatusMixin,TransactionMixin):
             layers = []
             for group_layer in LayerGroupLayers.objects.filter(group=self).order_by("order"):
                 if group_layer.layer and group_layer.layer.is_published:
-                    layers.append({"type":"wms_layer","name":group_layer.layer.name,"store":group_layer.layer.server.name,"workspace":group_layer.layer.server.workspace.name})
+                    layers.append({"type":"wms_layer","name":group_layer.layer.kmi_name,"store":group_layer.layer.server.name,"workspace":group_layer.layer.server.workspace.name})
                 elif group_layer.publish and group_layer.publish.is_published:
                     layers.append({"type":"publish","name":group_layer.publish.name,"workspace":group_layer.publish.workspace.name})
                 elif group_layer.sub_group and group_layer.sub_group.is_published:

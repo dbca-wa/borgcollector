@@ -97,11 +97,9 @@ class Datasource(BorgModel,ResourceStatusMixin,TransactionMixin):
         finally:
             self.try_clear_transaction("datasource_save")
 
-        if (not getattr(self,"refreshed",False)
-            and hasattr(self,"changed_fields") 
-            and (self.changed_fields == "__all__"  or any([f in self.changed_fields for f in ["host","port","db_name","schema","user","password"]]))
+        if (update_fields is None
+            and (self.changed_fields == "__all__"  or any([f in self.changed_fields for f in ["host","port","db_name","schema","user","password","filter"]]))
             ):
-            setattr(self,"refreshed",True)
             self.refresh()
 
     def delete(self,using=None):
@@ -169,6 +167,7 @@ class Datasource(BorgModel,ResourceStatusMixin,TransactionMixin):
             self.save(update_fields=["layers","last_refresh_time"])
         finally:
             self.try_clear_transaction("datasource_refresh")
+
 
 
     def json_filename(self,action='publish'):
@@ -412,7 +411,16 @@ class Layer(BorgModel,ResourceStatusMixin,TransactionMixin,SpatialTableMixin):
         if 400 <= res.status_code < 600 and res.content:
             res.reason = "{}({})".format(res.reason,res.content)
         res.raise_for_status()
-        meta_data = res.json()
+        try:
+            meta_data = res.json()
+        except:
+            if res.content.find("microsoft") >= 0:
+                res.status_code = 401
+                res.reason = "Please login"
+            else:
+                res.status_code = 400
+                res.reason = "Unknown reason"
+            res.raise_for_status()
 
         #process styles
         styles = meta_data.get("styles",[])
@@ -519,6 +527,7 @@ class Layer(BorgModel,ResourceStatusMixin,TransactionMixin,SpatialTableMixin):
                 json_out = {}
                 json_out["name"] = self.kmi_name
                 json_out["workspace"] = self.datasource.workspace.name
+                json_out["styles"] = {}
 
                 json_out["spatial_data"] = self.is_spatial
                 json_out["channel"] = self.datasource.workspace.publish_channel.name
@@ -790,7 +799,16 @@ class SqlViewLayer(BorgModel,ResourceStatusMixin,TransactionMixin,SpatialTableMi
         if 400 <= res.status_code < 600 and res.content:
             res.reason = "{}({})".format(res.reason,res.content)
         res.raise_for_status()
-        meta_data = res.json()
+        try:
+            meta_data = res.json()
+        except:
+            if res.content.find("microsoft") >= 0:
+                res.status_code = 401
+                res.reason = "Please login"
+            else:
+                res.status_code = 400
+                res.reason = "Unknown reason"
+            res.raise_for_status()
 
         #process styles
         styles = meta_data.get("styles",[])
@@ -897,6 +915,7 @@ class SqlViewLayer(BorgModel,ResourceStatusMixin,TransactionMixin,SpatialTableMi
                 json_out = {}
                 json_out["name"] = self.kmi_name
                 json_out["workspace"] = self.datasource.workspace.name
+                json_out["styles"] = {}
 
                 json_out["spatial_data"] = self.is_spatial
                 json_out["channel"] = self.datasource.workspace.publish_channel.name
