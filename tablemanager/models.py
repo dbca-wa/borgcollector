@@ -2642,7 +2642,7 @@ class Publish(Transform,ResourceStatusMixin,SpatialTableMixin):
             #process styles
             styles = meta_data.get("styles",[])
             #filter out qml and lyr styles
-            sld_styles = [s for s in meta_data.get("styles",[]) if s["format"].lower() == "sld"]
+            sld_styles = [s for s in meta_data.get("styles",[]) if s["format"].lower() == "sld" and s.get("raw_content")]
             meta_data["styles"] = {}
             if style_dump_dir:
                 if not os.path.exists(style_dump_dir):
