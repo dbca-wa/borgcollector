@@ -3,6 +3,7 @@
 *.swp
 *.pyc
 *.env
+.env.*
 *.orig
 venv
 staticfiles

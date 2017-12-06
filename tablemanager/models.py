@@ -873,11 +873,15 @@ class Input(JobFields,SpatialTableMixin):
         return the data source's layer name
         """
         if hasattr(self, "_layer_name"): return self._layer_name
-        output = subprocess.check_output(["ogrinfo", "-q", "-ro", self.vrt.name], stderr=subprocess.STDOUT)
+        output = subprocess.check_output(["ogrinfo", "-q", "-ro","-so","-al", self.vrt.name], stderr=subprocess.STDOUT)
         if output.find("ERROR") > -1:
-            raise Exception(l)
+            raise Exception(output)
         else:
-            self._layer_name = output.replace("1: ", "").split(" (")[0].strip()
+            m = self._layer_name_re.search(output)
+            if m:
+                self._layer_name = m.group("layerName")
+            else:
+                raise Exception("Failed to find layer name")
             return self._layer_name
 
     def insert_fields(self):
@@ -1002,7 +1006,7 @@ class Input(JobFields,SpatialTableMixin):
             raise ValidationError(e)
     
 
-    _layer_name_re = re.compile('Layer name: [^\n]*\n')
+    _layer_name_re = re.compile('Layer name: (?P<layerName>[^\n]+)')
     def _set_info(self,database=None,table=None):
         """
         set the data source's information dictionary
@@ -1044,7 +1048,6 @@ class Input(JobFields,SpatialTableMixin):
         Return True if import successfully; False if import process is terminated.
         """
         validation = not job_id
-
         # Make sure DB is GIS enabled and then load using ogr2ogr
         database = "PG:dbname='{NAME}' host='{HOST}' port='{PORT}'  user='{USER}' password='{PASSWORD}'".format(**settings.DATABASES["default"])
         table = "{0}.{1}".format(schema,self.name)
@@ -2311,47 +2314,58 @@ class Publish(Transform,ResourceStatusMixin,SpatialTableMixin):
         the solution is update the existing file instead of removing it.
         """
         #use published meta file as the meta file for unpublish
-        json_file = self.output_filename_abs('publish')
-        if not os.path.exists(json_file):
-            #raise Exception("Can't find the publish json file({}) in repository.".format(self.output_filename('publish')))
-            #no json file in repository, already unpublished
-            return
-
-        json_out = None
-        with open(json_file,"r") as f:
-            json_out = json.loads(f.read())
-
-        if "meta" not in json_out or "file" not in json_out["meta"]:
-            raise Exception("Can't find meta file in the publish json file({})".format(self.output_filename('publish')))
-
-        published_meta_file = json_out["meta"]["file"][len(BorgConfiguration.MASTER_PATH_PREFIX):]
-        if not os.path.exists(published_meta_file):
-            raise Exception("Published meta file({}) is missing.".format(published_meta_file))
-
-        if self.workspace.workspace_as_schema:
-            meta_file_folder = os.path.join(BorgConfiguration.UNPUBLISH_DIR,self.workspace.publish_channel.name,self.workspace.name,"layers")
+        publish_file = self.output_filename_abs('publish')
+        publish_json = None
+        if os.path.exists(publish_file):
+            with open(publish_file,"r") as f:
+                publish_json = json.loads(f.read())
         else:
-            meta_file_folder = os.path.join(BorgConfiguration.UNPUBLISH_DIR,self.workspace.publish_channel.name,"layers")
+            publish_json = {}
 
-        #write meta data file
-        file_name = "{}.meta.json".format(self.table_name)
-        meta_file = os.path.join(meta_file_folder,file_name)
+        json_file = self.output_filename_abs('unpublish')
+        json_out = None
 
-        if not os.path.exists(os.path.dirname(meta_file)):
-            os.makedirs(os.path.dirname(meta_file))
+        if publish_json.get("action","publish") != "remove":
+            #require the properties ("name", "workspace","schema","data_schema","outdated_schema","action","styles", "channel", "spatial_data", "sync_postgres_data", "sync_geoserver_data") to unpublish
+            json_out = {}
+            json_out["name"] = self.table_name
+            json_out["workspace"] = self.workspace.name
+            json_out["schema"] = self.workspace.publish_schema
+            json_out["data_schema"] = self.workspace.publish_data_schema
+            json_out["outdated_schema"] = self.workspace.publish_outdated_schema
+            json_out["channel"] = self.workspace.publish_channel.name
+            json_out["spatial_data"] = self.is_spatial
+            json_out["sync_postgres_data"] = self.workspace.publish_channel.sync_postgres_data
+            json_out["sync_geoserver_data"] = self.workspace.publish_channel.sync_geoserver_data
+            json_out["styles"] = {}
 
-        shutil.copyfile(published_meta_file,meta_file)
+            #retrieve meta data from the last publish task
+            meta_json = publish_json
+            if "meta" in publish_json and "file" in publish_json["meta"]:
+                meta_file = publish_json["meta"]["file"][len(BorgConfiguration.MASTER_PATH_PREFIX):]
+                if os.path.exists(meta_file):
+                    with open(meta_file,"r") as f:
+                        meta_json = json.loads(f.read())
+                else:
+                    meta_json = {}
 
+            for key,value in meta_json.get("styles",{}).iteritems():
+                json_out["styles"][key] = {"default":value.get("default",False)}
+
+            for key in ["name","workspace","schema","data_schema","outdated_schema","channel","spatial_data","sync_postgres_data","sync_geoserver_data"]:
+                if key in meta_json:
+                    json_out[key] = meta_json[key]
+                
+            json_out["action"] = 'remove'
+        else:
+            json_out = publish_json
+    
         #remove it from catalogue service
         res = requests.delete("{}/catalogue/api/records/{}:{}/".format(settings.CSW_URL,self.workspace.name,self.table_name),auth=(settings.CSW_USER,settings.CSW_PASSWORD))
         if res.status_code != 404:
             res.raise_for_status()
-
-        json_out["action"] = 'remove'
+    
         json_out["remove_time"] = timezone.localtime(timezone.now()).strftime("%Y-%m-%d %H:%M:%S.%f")
-        json_out['meta'] = {"file":"{}{}".format(BorgConfiguration.MASTER_PATH_PREFIX, meta_file),"md5":file_md5(meta_file)}
-
-
         with open(json_file, "wb") as output:
             json.dump(json_out, output, indent=4)
 
@@ -2614,7 +2628,17 @@ class Publish(Transform,ResourceStatusMixin,SpatialTableMixin):
             if 400 <= res.status_code < 600 and res.content:
                 res.reason = "{}({})".format(res.reason,res.content)
             res.raise_for_status()
-            meta_data = res.json()
+            try:
+                meta_data = res.json()
+            except:
+                res.status_code = 400
+                if res.content.find("microsoft") >= 0:
+                    res.status_code = 401
+                    res.reason = "Please login"
+                else:
+                    res.status_code = 400
+                    res.reason = "Unknown reason"
+                res.raise_for_status()
             #process styles
             styles = meta_data.get("styles",[])
             #filter out qml and lyr styles
