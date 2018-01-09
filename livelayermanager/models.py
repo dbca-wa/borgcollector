@@ -425,7 +425,7 @@ class Layer(BorgModel,ResourceStatusMixin,TransactionMixin,SpatialTableMixin):
         #process styles
         styles = meta_data.get("styles",[])
         #filter out qml and lyr styles
-        sld_styles = [s for s in meta_data.get("styles",[]) if s["format"].lower() == "sld"]
+        sld_styles = [s for s in meta_data.get("styles",[]) if s["format"].lower() == "sld" and s.get("raw_content")]
         meta_data["styles"] = {}
         style_dump_dir = BorgConfiguration.LIVE_LAYER_DIR
         if not os.path.exists(style_dump_dir):
@@ -813,7 +813,7 @@ class SqlViewLayer(BorgModel,ResourceStatusMixin,TransactionMixin,SpatialTableMi
         #process styles
         styles = meta_data.get("styles",[])
         #filter out qml and lyr styles
-        sld_styles = [s for s in meta_data.get("styles",[]) if s["format"].lower() == "sld"]
+        sld_styles = [s for s in meta_data.get("styles",[]) if s["format"].lower() == "sld" and s.get("raw_content")]
         meta_data["styles"] = {}
         style_dump_dir = BorgConfiguration.LIVE_LAYER_DIR
         if not os.path.exists(style_dump_dir):
