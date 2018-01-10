@@ -30,6 +30,7 @@ if FDW_URL:
 else:
     FDW_URL_SETTINGS = {}
 
+ALLOWED_HOSTS=[h.strip() for h in (os.environ.get('ALLOWED_HOSTS') or '*').split(',') if h.strip()]
 
 CSW_URL = os.environ.get('CSW_URL','')
 CSW_USER = os.environ.get('CSW_USER','')
