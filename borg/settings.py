@@ -20,7 +20,7 @@ BASE_DIR = os.path.dirname(os.path.dirname(__file__))
 # define the following in the environment
 SECRET_KEY = os.environ.get('SECRET_KEY', '')
 FDW_URL = os.environ.get('FDW_URL', '')
-DEBUG = str(os.environ.get('DEBUG') or 'false')).lower() in ("true","on","yes","y","t")
+DEBUG = str(os.environ.get('DEBUG') or 'false').lower() in ("true","on","yes","y","t")
 FDW_URL_SETTINGS = None
 if FDW_URL:
     FDW_URL_SETTINGS = dj_database_url.parse(FDW_URL)
@@ -30,6 +30,7 @@ if FDW_URL:
 else:
     FDW_URL_SETTINGS = {}
 
+ALLOWED_HOSTS=[h.strip() for h in (os.environ.get('ALLOWED_HOSTS') or '*').split(',') if h.strip()]
 
 CSW_URL = os.environ.get('CSW_URL','')
 CSW_USER = os.environ.get('CSW_USER','')
