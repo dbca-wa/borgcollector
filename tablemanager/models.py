@@ -2361,7 +2361,7 @@ class Publish(Transform,ResourceStatusMixin,SpatialTableMixin):
             json_out = publish_json
     
         #remove it from catalogue service
-        res = requests.delete("{}/catalogue/api/records/{}:{}/".format(settings.CSW_URL,self.workspace.name,self.table_name),auth=(settings.CSW_USER,settings.CSW_PASSWORD))
+        res = requests.delete("{}/catalogue/api/records/{}:{}/".format(settings.CSW_URL,self.workspace.name,self.table_name),auth=(settings.CSW_USER,settings.CSW_PASSWORD),verify=settings.CSW_CERT_VERIFY)
         if res.status_code != 404:
             res.raise_for_status()
     

@@ -35,6 +35,7 @@ ALLOWED_HOSTS=[h.strip() for h in (os.environ.get('ALLOWED_HOSTS') or '*').split
 CSW_URL = os.environ.get('CSW_URL','')
 CSW_USER = os.environ.get('CSW_USER','')
 CSW_PASSWORD = os.environ.get('CSW_PASSWORD','')
+CSW_CERT_VERIFY = str(os.environ.get('CSW_CERT_VERIFY') or 'true').lower() in ("true","on","yes","y","t")
 DEFAULT_CRS=os.environ.get("DEFAULT_CRS","EPSG:4326")
 
 # Django suit
