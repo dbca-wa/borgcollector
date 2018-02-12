@@ -2624,7 +2624,7 @@ class Publish(Transform,ResourceStatusMixin,SpatialTableMixin):
         crs = meta_data.get("crs",None)
         #update catalog service
         if self.workspace.publish_channel.sync_geoserver_data:
-            res = requests.post("{}/catalogue/api/records/?style_content=true".format(settings.CSW_URL),json=meta_data,auth=(settings.CSW_USER,settings.CSW_PASSWORD))
+            res = requests.post("{}/catalogue/api/records/?style_content=true".format(settings.CSW_URL),json=meta_data,auth=(settings.CSW_USER,settings.CSW_PASSWORD),verify=settings.CSW_CERT_VERIFY)
             if 400 <= res.status_code < 600 and res.content:
                 res.reason = "{}({})".format(res.reason,res.content)
             res.raise_for_status()

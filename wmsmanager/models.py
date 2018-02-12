@@ -505,7 +505,7 @@ class WmsLayer(models.Model,ResourceStatusMixin,TransactionMixin):
         bbox = meta_data.get("bounding_box",None)
         crs = meta_data.get("crs",None)
         #update catalog service
-        res = requests.post("{}/catalogue/api/records/".format(settings.CSW_URL),json=meta_data,auth=(settings.CSW_USER,settings.CSW_PASSWORD))
+        res = requests.post("{}/catalogue/api/records/".format(settings.CSW_URL),json=meta_data,auth=(settings.CSW_USER,settings.CSW_PASSWORD),verify=settings.CSW_CERT_VERIFY)
         if 400 <= res.status_code < 600 and res.content:
             res.reason = "{}({})".format(res.reason,res.content)
         res.raise_for_status()
@@ -576,7 +576,7 @@ class WmsLayer(models.Model,ResourceStatusMixin,TransactionMixin):
 
     def unpublish(self):
         #remove it from catalogue service
-        res = requests.delete("{}/catalogue/api/records/{}:{}/".format(settings.CSW_URL,self.server.workspace.name,self.kmi_name),auth=(settings.CSW_USER,settings.CSW_PASSWORD))
+        res = requests.delete("{}/catalogue/api/records/{}:{}/".format(settings.CSW_URL,self.server.workspace.name,self.kmi_name),auth=(settings.CSW_USER,settings.CSW_PASSWORD),verify=settings.CSW_CERT_VERIFY)
         if res.status_code != 404:
             res.raise_for_status()
 
