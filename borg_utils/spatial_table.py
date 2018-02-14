@@ -314,7 +314,11 @@ SpatialTableCache = {}
 class SpatialTableMixin(object):
     def spatialTable(self,schema=None,refresh=False,bbox=False,crs=False):
         o = getattr(self,"_spatialTable",None)
-        if not o:
+        if o:
+            if refresh:
+                o._schema = schema
+                o.refresh(bbox,crs)
+        else:
             schema = schema or self.table_schema
             dbUtil = self.db_util or defaultDbUtil
             try:

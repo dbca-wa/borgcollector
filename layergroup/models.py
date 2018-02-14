@@ -224,7 +224,7 @@ class LayerGroup(models.Model,ResourceStatusMixin,TransactionMixin):
         meta_data = self.builtin_metadata
         if extra_datas:
             meta_data.update(extra_datas)
-        res = requests.post("{}/catalogue/api/records/".format(settings.CSW_URL),json=meta_data,auth=(settings.CSW_USER,settings.CSW_PASSWORD))
+        res = requests.post("{}/catalogue/api/records/".format(settings.CSW_URL),json=meta_data,auth=(settings.CSW_USER,settings.CSW_PASSWORD),verify=settings.CSW_CERT_VERIFY)
         if 400 <= res.status_code < 600 and res.content:
             res.reason = "{}({})".format(res.reason,res.content)
         res.raise_for_status()
@@ -262,7 +262,7 @@ class LayerGroup(models.Model,ResourceStatusMixin,TransactionMixin):
         unpublish layer group
         """
         #remove it from catalogue service
-        res = requests.delete("{}/catalogue/api/records/{}:{}/".format(settings.CSW_URL,self.workspace.name,self.name),auth=(settings.CSW_USER,settings.CSW_PASSWORD))
+        res = requests.delete("{}/catalogue/api/records/{}:{}/".format(settings.CSW_URL,self.workspace.name,self.name),auth=(settings.CSW_USER,settings.CSW_PASSWORD),verify=settings.CSW_CERT_VERIFY)
         if res.status_code != 404:
             res.raise_for_status()
 
