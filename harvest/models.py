@@ -32,17 +32,20 @@ class Process(models.Model):
     def is_alive(self):
         """
         check whether process is alive or not.
+        currently borg is only deployed on one server, so no need to check the server
         """
         if self.pid:
-            if self.current_server == self.server and self.current_pid == self.pid:
+            #if self.current_server == self.server and self.current_pid == self.pid:
+            if self.current_pid == self.pid:
                 #same process
                 return True
             else:
-                if self.current_server == self.server:
+                #not the same process
+                if True or self.current_server == self.server:
                     #same server
                     if not os.path.exists(os.path.join("/proc",str(self.pid))):
+                        #process is dead.
                         return False
-                #not the same process, check the heatbeat
                 if self.status == "shutdown":
                     return False
                 else:
@@ -58,13 +61,15 @@ class Process(models.Model):
         """
         if self.is_alive:
             #the proess is alive, can run only if the process is the same process as the checking process
-            return self.current_server == self.server and self.current_pid == self.pid
+            #return self.current_server == self.server and self.current_pid == self.pid
+            return self.current_pid == self.pid
         else:
             return True
 
     @property
     def same_process(self):
-        return self.current_server == self.server and self.current_pid == self.pid
+        #return self.current_server == self.server and self.current_pid == self.pid
+        return self.current_pid == self.pid
         
 
 class Job(models.Model):
