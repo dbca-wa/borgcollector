@@ -245,6 +245,7 @@ class WmsServer(models.Model,ResourceStatusMixin,TransactionMixin):
                                         last_publish_time=None,
                                         last_unpublish_time=None,
                                         last_modify_time=None,
+                                        legend=legendurl_element.get("{{{}}}href".format(getcapabilities_ns['xlink']),None) if legendurl_element is not None else None,
                                         crs=crs,
                                         bbox=bbox,
                                         last_refresh_time=process_time)
