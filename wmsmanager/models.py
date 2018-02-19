@@ -785,12 +785,15 @@ class WmsServerEventListener(object):
             #publish succeed, change the status to published.
             instance.last_publish_time = timezone.now()
             #cascade publish layers
+            """
+            cascade publish will trigger all published layers from this wms server to be published again, and in most cases, this is unnecessary.
             for layer in instance.wmslayer_set.all():
                 target_status = layer.next_status(ResourceAction.CASCADE_PUBLISH)
                 if layer.status != target_status or layer.publish_required:
                     #need to publish
                     layer.status = target_status
                     layer.save(update_fields=["status","last_publish_time"])
+            """
 
 class WmsLayerEventListener(object):
     @staticmethod
