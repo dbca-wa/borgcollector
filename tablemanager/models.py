@@ -619,7 +619,7 @@ class Input(JobFields,SpatialTableMixin):
                 return self._info_dict
 
         #import ipdb;ipdb.set_trace()
-        search , info = "(Layer name: .*)\n(Geometry: .*)\n(Feature Count: .*)\n(Extent: .*)\n", self.info
+        search , info = "(Layer name: .*)\n+(Geometry: .*)\n+(Feature Count: .*)\n+(Extent: .*)\n+", self.info
         if not info.find("Extent: ") > -1:
             info = info.replace("\nLayer SRS", "\nExtent: Non Spatial\nLayer SRS")
         data = re.findall(search, info, re.M)
