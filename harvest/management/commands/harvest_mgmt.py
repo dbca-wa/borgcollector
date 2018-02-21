@@ -67,7 +67,7 @@ class RepeatedJob(object):
             try:
                 p = Process.objects.get(name=self.name)
                 if not p.can_run:
-                    logger.info("The process () is already running on server {} with pid ({})".format(p.name,p.server,p.pid))
+                    logger.info("The process {} is already running on server {} with pid ({})".format(p.name,p.server,p.pid))
                     #force to reload process information.
                     self._process = None
                     return self._interval.next_scheduled_time()
