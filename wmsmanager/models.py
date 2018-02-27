@@ -98,7 +98,10 @@ class WmsServer(models.Model,ResourceStatusMixin,TransactionMixin):
             raise ValidationError("Not changed.")
 
         if not o or o.capability_url != self.capability_url:
-           self.refresh_layers(False)
+            if not o:
+                #new wmsserver,save it first for refresh layers
+                self.save()
+            self.refresh_layers(False)
 
         if o:
             #already exist
