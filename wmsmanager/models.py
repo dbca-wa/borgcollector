@@ -61,7 +61,7 @@ class WmsSyncStatus(object):
     NOT_EXECUTED = 'Not Executed'
 
 class WmsServer(models.Model,ResourceStatusMixin,TransactionMixin):
-    name = models.SlugField(max_length=64,null=False,editable=True,primary_key=True, help_text="The name of wms server", validators=[validate_slug])
+    name = models.SlugField(max_length=64,null=False,editable=True,unique=True, help_text="The name of wms server", validators=[validate_slug])
     workspace = models.ForeignKey(Workspace, null=False,blank=False)
     capability_url = models.CharField(max_length=256,null=False,editable=True)
     user = models.CharField(max_length=32,null=True,blank=True)
@@ -98,7 +98,10 @@ class WmsServer(models.Model,ResourceStatusMixin,TransactionMixin):
             raise ValidationError("Not changed.")
 
         if not o or o.capability_url != self.capability_url:
-           self.refresh_layers(False)
+            if not o:
+                #new wmsserver,save it first for refresh layers
+                self.save()
+            self.refresh_layers(False)
 
         if o:
             #already exist
@@ -742,6 +745,7 @@ class WmsLayer(models.Model,ResourceStatusMixin,TransactionMixin):
     class Meta:
         unique_together = (("server","name"),("server","kmi_name"))
         ordering = ("server","name")
+        pass
 
 class PublishedWmsLayer(WmsLayer):
     class Meta:

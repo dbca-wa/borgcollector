@@ -29,7 +29,7 @@ class WmsServerAdmin(admin.ModelAdmin):
 
     def _layers(self,o):
         if o.layers > 0:
-            return "<a href='/wmsmanager/wmslayer/?q=&server__name__exact={0}'>{1}</a>".format(o.name,o.layers)
+            return "<a href='/wmsmanager/wmslayer/?q=&server__id={0}'>{1}</a>".format(o.id,o.layers)
         elif o.last_refresh_time:
             return "0"
         else:
