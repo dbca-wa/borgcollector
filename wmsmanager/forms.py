@@ -29,10 +29,15 @@ class WmsServerForm(forms.ModelForm,GeoserverSettingForm):
         kwargs['initial']=kwargs.get('initial',{})
         self.get_setting_from_model(*args,**kwargs)
         super(WmsServerForm, self).__init__(*args, **kwargs)
-        if 'instance' in kwargs and  kwargs['instance'] and kwargs['instance'].pk:
+        if 'instance' in kwargs and  kwargs['instance'] and kwargs['instance'].pk and kwargs['instance'].is_published:
             self.fields['name'].widget.attrs['readonly'] = True
 
             self.fields['workspace'].widget.attrs['readonly'] = True
+        else:
+            if "readonly" in self.fields['name'].widget.attrs:
+                del self.fields['name'].widget.attrs['readonly']
+            if "readonly" in self.fields['workspace'].widget.attrs:
+                del self.fields['workspace'].widget.attrs['readonly']
 
     def _post_clean(self):
         if self.errors:
