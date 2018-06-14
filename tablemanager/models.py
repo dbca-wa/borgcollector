@@ -11,6 +11,7 @@ import threading
 import shutil
 import time
 import signal
+import sys
 import json
 import StringIO
 import codecs
@@ -844,7 +845,9 @@ class Input(JobFields,SpatialTableMixin):
         self.last_modify_time = timezone.now()
 
         try:
+            logger.debug("Begin to get dataset spatial information")
             self._set_info()
+            logger.debug("End to get dataset spatial information and begin to harvest data")
             #automatically add a "<GeometryType>WkbNone</GeometryType>" if the data set is not a spatial data set
             if self.source.find("GeometryType") == -1 and self.source.find("GeometryField") == -1 and self.source.find("LayerSRS") == -1:
                 #data source does not contain any spatial related properties.
@@ -856,13 +859,17 @@ class Input(JobFields,SpatialTableMixin):
 
             self.invoke(cursor,schema)
 
+            logger.debug("End to harvest data and begin to generate row id")
             self._populate_rowid(cursor,schema)
 
+            logger.debug("End to generate row id and begin to get table structure")
             self.create_table_sql = self.get_create_table_sql()
 
+            logger.debug("End to get table structure and begin to get table's spatial info")
             #import ipdb;ipdb.set_trace()
             #check the table is spatial or non spatial
             self.spatial_info = self.refresh_spatial_info(schema).get_spatial_info()
+            logger.debug("End to validation the table({})'sdata".format(self.table_name))
         except ValidationError as e:
             raise e
         except Exception as e:
@@ -2286,10 +2293,17 @@ class Publish(Transform,ResourceStatusMixin,SpatialTableMixin):
 
             if self.pk and hasattr(self,"changed_fields")  and "status" in self.changed_fields:
                 #publish status changed.
-                if (not self.publish_status.publish_enabled) and (orig.publish_status.publish_enabled):
+                orig = None
+                if self.pk:
+                    orig = Publish.objects.get(pk=self.pk)
+                if (not self.publish_status.publish_enabled) and (orig and orig.publish_status.publish_enabled):
                     #from publish enabled to publish disabled.
                     try:
                         self.unpublish()
+                        self.pending_actions = None
+                        self.job_id = None
+                        self.job_batch_id = None
+                        self.job_status = None
                     except:
                         error = sys.exc_info()
                         raise ValidationError(traceback.format_exception_only(error[0],error[1]))
@@ -2349,7 +2363,7 @@ class Publish(Transform,ResourceStatusMixin,SpatialTableMixin):
                 else:
                     meta_json = {}
 
-            for key,value in meta_json.get("styles",{}).iteritems():
+            for key,value in (meta_json.get("styles") or {}).iteritems():
                 json_out["styles"][key] = {"default":value.get("default",False)}
 
             for key in ["name","workspace","schema","data_schema","outdated_schema","channel","spatial_data","sync_postgres_data","sync_geoserver_data"]:
