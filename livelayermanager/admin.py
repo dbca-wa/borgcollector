@@ -392,7 +392,7 @@ class SqlViewLayerAdmin(admin.ModelAdmin):
 
     def _sql(self,o):
         if o.sql:
-            return "<p style='white-space:pre'>" + o.sql + "</p>"
+            return "<p style='white-space:normal'>" + o.sql + "</p>"
         else:
             return ''
 
