@@ -2600,7 +2600,7 @@ class Publish(Transform,ResourceStatusMixin,SpatialTableMixin):
 
         #bbox
         if self.is_spatial:
-            meta_data["bounding_box"] = self.bbox
+            meta_data["bounding_box"] = json.dumps(self.bbox)
             meta_data["crs"] = self.crs
 
         meta_data["styles"] = []
