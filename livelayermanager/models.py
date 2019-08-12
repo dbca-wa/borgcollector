@@ -378,7 +378,7 @@ class Layer(BorgModel,ResourceStatusMixin,TransactionMixin,SpatialTableMixin):
         meta_data["modified"] = (self.last_modify_time or self.last_refresh_time).astimezone(timezone.get_default_timezone()).strftime("%Y-%m-%d %H:%M:%S.%f")
 
         #bbox
-        meta_data["bounding_box"] = self.kmi_bbox or self.bbox or None
+        meta_data["bounding_box"] = self.kmi_bbox or (json.dumps(self.bbox) if self.bbox else None)
         meta_data["crs"] = self.crs or None
 
         #ows resource
@@ -766,7 +766,7 @@ class SqlViewLayer(BorgModel,ResourceStatusMixin,TransactionMixin,SpatialTableMi
         meta_data["modified"] = (self.last_modify_time or self.last_refresh_time).astimezone(timezone.get_default_timezone()).strftime("%Y-%m-%d %H:%M:%S.%f")
 
         #bbox
-        meta_data["bounding_box"] = self.kmi_bbox or self.bbox or None
+        meta_data["bounding_box"] = self.kmi_bbox or (json.dumps(self.bbox) if self.bbox else None)
         meta_data["crs"] = self.crs or None
 
         #ows resource
