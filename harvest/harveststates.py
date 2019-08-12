@@ -106,7 +106,7 @@ class Waiting(HarvestState):
                         for i in j.inputs:
                             if i.id == o.id:
                                 #input is used by other running jobs, the current job will continue to wait
-                                dependent_jobs.append({"id":i.id, "publish":i.name, "state": i.state})
+                                dependent_jobs.append({"id":j.id,"batch_id":j.batch_id, "publish":j.publish.table_name, "state": j.state})
 
                     if dependent_jobs:
                         #still have some running harvest job dependents on the inputed data. the current job must wait until all dependent job finished.

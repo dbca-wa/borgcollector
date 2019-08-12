@@ -291,7 +291,7 @@ class Command(BaseCommand):
 
         #check datasource
         if options["check_ds"]:
-            jobs.append(CheckDsJob(JobInterval.Hourly))
+            jobs.append(CheckDsJob(JobInterval.Daily))
 
         #clean outdated jobs
         if options["clean_job"] or options["clean_job_now"]:
