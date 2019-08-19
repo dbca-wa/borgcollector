@@ -476,7 +476,7 @@ class WmsLayer(models.Model,ResourceStatusMixin,TransactionMixin):
         meta_data["modified"] = self.last_modify_time.astimezone(timezone.get_default_timezone()).strftime("%Y-%m-%d %H:%M:%S.%f") if self.last_modify_time else None
 
         #bbox
-        meta_data["bounding_box"] = self.kmi_bbox or (json.dumps(self.bbox) if self.bbox else None)
+        meta_data["bounding_box"] = self.kmi_bbox or self.bbox or None
         meta_data["crs"] = self.crs or None
 
         #ows resource
