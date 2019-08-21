@@ -119,8 +119,15 @@ class WmsServer(models.Model,ResourceStatusMixin,TransactionMixin):
             for k,v in default_parameters.iteritems():
                 if not re.compile("{}=".format(k),re.IGNORECASE).search(self.capability_url):
                     parameters[k] = v
+            setattr(self,"_wms_version",parameters["VERSION"])
             setattr(self,"_capability_url" , "{}?{}".format(url,urllib.urlencode(parameters)))
         return self._capability_url
+
+    @property
+    def wms_version(self):
+        url = self.get_capability_url
+        return self._wms_version
+
 
     def refresh_layers(self,save=True):
         result = None
@@ -131,11 +138,17 @@ class WmsServer(models.Model,ResourceStatusMixin,TransactionMixin):
         else:
             res = requests.get(self.get_capability_url, verify=False)
         res.raise_for_status()
+        if self.wms_version == "1.1.1":
+            namespace = ""
+        elif self.wms_version == "1.3.0":
+            namespace = "{http://www.opengis.net/wms}"
+        else:
+            raise Exception("Only support wms version 1.1.1 and 1.3.0")
         xml_data = res.text.encode('utf-8')
         root = ElementTree.fromstring(xml_data)
-        first_level_layer = root.find("Capability/Layer")
+        first_level_layer = root.find("{0}Capability/{0}Layer".format(namespace))
         with transaction.atomic():
-            layer_size = self._process_layer_xml(first_level_layer,now)
+            layer_size = self._process_layer_xml(namespace,first_level_layer,now)
                     
             if layer_size == 0:
                 #no layers found in the server
@@ -158,30 +171,30 @@ class WmsServer(models.Model,ResourceStatusMixin,TransactionMixin):
         except:
             return 999999
 
-    def _process_layer_xml(self,layer,process_time,path=None):
+    def _process_layer_xml(self,namespace,layer,process_time,path=None):
         """
         process layer xml.
         return the number of processed layers.
         """
-        layer_name_element = layer.find("Name")
-        layer_title_element = layer.find("Title")
+        layer_name_element = layer.find("{0}Name".format(namespace))
+        layer_title_element = layer.find("{0}Title".format(namespace))
         layer_size = 0
         if layer_name_element is not None:
             #import ipdb;ipdb.set_trace()
             layer_name = layer_name_element.text
             kmi_name = layer_name.replace(":","_").replace(" ","_")
-            layer_abstract_element = layer.find("Abstract")
-            boundingbox_iter = layer.iterfind("BoundingBox")
-            style_element = layer.find("Style")
-            legend_element = style_element.find("LegendURL") if style_element is not None else None
-            legendurl_element = legend_element.find("OnlineResource") if legend_element is not None else None
+            layer_abstract_element = layer.find("{0}Abstract".format(namespace))
+            boundingbox_iter = layer.iterfind("{0}BoundingBox".format(namespace))
+            style_element = layer.find("{0}Style".format(namespace))
+            legend_element = style_element.find("{0}LegendURL".format(namespace)) if style_element is not None else None
+            legendurl_element = legend_element.find("{0}OnlineResource".format(namespace)) if legend_element is not None else None
             crs = None
             crsPosition = None
             tmpcrs = None
             tmpcrsPosition = None
             bbox = None
             for boundingbox_element in boundingbox_iter:
-                tmpcrs = boundingbox_element.get("SRS",None)
+                tmpcrs = boundingbox_element.get("SRS" if self.wms_version == "1.1.1" else "CRS",None)
                 tmpcrsPosition = self.getCrsPriority(tmpcrs)
                 if tmpcrsPosition == 0:
                     crs = tmpcrs
@@ -193,7 +206,7 @@ class WmsServer(models.Model,ResourceStatusMixin,TransactionMixin):
                     crsPosition = tmpcrsPosition
 
             if not crs:
-                srs_iter = layer.iterfind("SRS")
+                srs_iter = layer.iterfind("{0}{1}".format(namespace,"SRS" if self.wms_version == "1.1.1" else "CRS"))
                 for srs_element in srs_iter:
                     tmpcrs = srs_element.text
                     tmpcrsPosition = self.getCrsPriority(tmpcrs)
@@ -264,9 +277,9 @@ class WmsServer(models.Model,ResourceStatusMixin,TransactionMixin):
         else:
            path = layer_title_element.text
 
-        layers = layer.findall("Layer")
+        layers = layer.findall("{0}Layer".format(namespace))
         for layer in layers:
-            layer_size += self._process_layer_xml(layer,process_time,path)
+            layer_size += self._process_layer_xml(namespace,layer,process_time,path)
 
         return layer_size
  
