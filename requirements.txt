@@ -14,5 +14,7 @@ requests
 honcho
 psycopg2
 pytz
-http://static.dpaw.wa.gov.au/static/py/dpaw-utils/dist/dpaw-utils-0.3a7.tar.gz
+git+git://github.com/dbca-wa/dpaw-utils@0.3a7
 restless
+django-confy==1.0.4
+gevent==1.4.0
