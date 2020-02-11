@@ -1,4 +1,4 @@
-Django==1.9.7
+Django==1.11.28
 django-suit==0.2.18
 django-extensions
 django-codemirror-widget
