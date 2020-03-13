@@ -357,6 +357,7 @@ class ForeignTable(BorgModel):
     name = models.SlugField(max_length=255, unique=True, help_text="The name of foreign table", validators=[validate_slug])
     server = models.ForeignKey(DataSource,limit_choices_to={"type":DatasourceType.DATABASE})
     sql = SQLField(default="CREATE FOREIGN TABLE \"{{schema}}\".\"{{self.name}}\" (<columns>) SERVER {{self.server.name}} OPTIONS (schema '<schema>', table '<table>');")
+    table_md5_support = models.BooleanField(null=False, default=True, help_text="If true, table md5 is used to check whether the data source is up to date.")
     last_modify_time = models.DateTimeField(auto_now=False,auto_now_add=True,editable=False,null=False)
 
     ROW_COUNT_SQL = "SELECT COUNT(*) FROM \"{0}\".\"{1}\";"
@@ -730,12 +731,13 @@ class Input(JobFields,SpatialTableMixin):
                     elif job.job_type == JobInterval.Triggered.name:
                         return False
                     elif job.batch_id:
-                        if "table_md5" in self.importing_dict and "row_count" in self.importing_dict:
+                        if "row_count" in self.importing_dict:
                             if self.foreign_table.table_row_count() != self.importing_dict["row_count"]:
                                 #inputing table has different number of rows with inputed table
                                 self.importing_info = None
                                 self.save(update_fields=['importing_info'])
                                 return False
+                        if self.foreign_table.table_md5_support and "table_md5" in self.importing_dict :
                             if self.foreign_table.table_md5() == self.importing_dict["table_md5"]:
                                 self.importing_dict["check_job_id"] = job.id
                                 self.importing_dict["check_batch_id"] = job.batch_id
@@ -1186,7 +1188,8 @@ class Input(JobFields,SpatialTableMixin):
     def _post_execute(self,cursor):
         if self.foreign_table:
             self.importing_dict["row_count"] = self.foreign_table.table_row_count()
-            self.importing_dict["table_md5"] = self.foreign_table.table_md5()
+            if self.foreign_table.table_md5_support:
+                self.importing_dict["table_md5"] = self.foreign_table.table_md5()
             if "check_job_id" in self.importing_dict: del self.importing_dict["check_job_id"]
             if "check_batch_id" in self.importing_dict: del self.importing_dict["check_batch_id"]
             #import ipdb;ipdb.set_trace()
