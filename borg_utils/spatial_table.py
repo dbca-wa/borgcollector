@@ -287,7 +287,7 @@ class SpatialTable(object):
     def is_spatial(self):
         return self.is_geometry or self.is_geography or self.is_raster
 
-    def create_indexes(self):
+    def create_indexes(self,cursor=None):
         """
         create gist index for each geometry column
         """
@@ -298,7 +298,7 @@ class SpatialTable(object):
             index_name = "{0}_{1}".format(self._table,c[0])
             index_exists = self._dbUtil.exists(SpatialTable._check_index_sql.format(self._schema,self._table,index_name))
             if not index_exists:
-                self._dbUtil.update(SpatialTable._create_index_sql.format(self._schema,self._table,index_name,c[0]))
+                self._dbUtil.update(SpatialTable._create_index_sql.format(self._schema,self._table,index_name,c[0]),cursor=cursor)
             
     def drop_indexes(self):
         """
@@ -353,8 +353,8 @@ class SpatialTableMixin(object):
         self.spatialTable(schema=schema,refresh=True,bbox=bbox,crs=crs)
         return self
 
-    def create_indexes(self,schema=None):
-        self.spatialTable(schema).create_indexes()
+    def create_indexes(self,schema=None,cursor=None):
+        self.spatialTable(schema).create_indexes(cursor=cursor)
 
     def drop_indexes(self,schema=None):
         self.spatialTable(schema).refresh().drop_indexes()
