@@ -2191,6 +2191,8 @@ class Publish(Transform,ResourceStatusMixin,SpatialTableMixin):
         cursor.execute("DROP TABLE IF EXISTS \"{0}\".\"{1}\" CASCADE;".format(publish_schema,self.table_name))
         super(Publish,self).drop(cursor,transform_schema)
 
+    get_timeout_sql = "show statement_timeout"
+    set_timeout_sql = "set statement_timeout to '{}'"
     def invoke(self, cursor,trans_schema,normal_schema,publish_view_schema,publish_schema):
         """
         invoke the function to populate the table data in speicifed schema
@@ -2201,32 +2203,41 @@ class Publish(Transform,ResourceStatusMixin,SpatialTableMixin):
         #drop all indexes except primary key
         #defaultDbUtil.drop_all_indexes(self.table_name,publish_schema,False)
 
-        sql = "CREATE OR REPLACE VIEW \"{3}\".\"{0}\" AS SELECT *, md5(CAST(row.* AS text)) as md5_rowhash FROM \"{2}\".\"{1}\"() as row;".format(self.table_name,self.func_name,trans_schema,publish_view_schema)
-        cursor.execute(sql)
-        sql = (
-            "DROP TABLE IF EXISTS \"{4}\".\"{0}\" CASCADE;\n"
-            #"CREATE TABLE IF NOT EXISTS \"{4}\".\"{0}\" (LIKE \"{3}\".\"{0}\",\n"
-            "CREATE TABLE \"{4}\".\"{0}\" (LIKE \"{3}\".\"{0}\",\n"
-            "CONSTRAINT pk_{0} PRIMARY KEY (md5_rowhash));\n"
-            #"CREATE TABLE IF NOT EXISTS \"{0}_diff\" (\n"
-            #"difftime TIMESTAMP PRIMARY KEY\n,"
-            #"inserts VARCHAR(32)[], deletes VARCHAR(32)[]);\n"
-            #"INSERT INTO \"{0}_diff\" select now() as difftime, del.array_agg as deletes, ins.array_agg as inserts from\n"
-            #"(select array_agg(d.md5_rowhash) from (select md5_rowhash from \"{0}\" except (select md5_rowhash from publish_view.\"{0}\")) as d) as del,\n"
-            #"(select array_agg(i.md5_rowhash) from (select md5_rowhash from publish_view.\"{0}\" except (select md5_rowhash from \"{0}\")) as i) as ins;\n"
-            #"TRUNCATE \"{4}\".\"{0}\";" # For now don't actually use diff just truncate/full reinsert
-            "INSERT INTO \"{4}\".\"{0}\" SELECT * FROM \"{3}\".\"{0}\";"
-            ).format(self.table_name, timezone.now(),trans_schema,publish_view_schema,publish_schema)
-        cursor.execute(sql)
-
-        #create extra index
-        if self.create_extra_index_sql and self.create_extra_index_sql.strip():
-            sql = Template(self.create_extra_index_sql).render(Context({"self": self,"publish_schema":publish_schema}))
+        cursor.execute(self.get_timeout_sql)
+        default_timeout = cursor.fetchone()[0]
+        try:
+            #clear the statement timeout
+            cursor.execute(self.set_timeout_sql.format("0"))
+            sql = "CREATE OR REPLACE VIEW \"{3}\".\"{0}\" AS SELECT *, md5(CAST(row.* AS text)) as md5_rowhash FROM \"{2}\".\"{1}\"() as row;".format(self.table_name,self.func_name,trans_schema,publish_view_schema)
             cursor.execute(sql)
-
-        #create index
-        #print "refresh spatial info for table (id={}, name={})".format(self.id,self.table_name)
-        self.refresh_spatial_info(publish_schema).create_indexes()
+            sql = (
+                "DROP TABLE IF EXISTS \"{4}\".\"{0}\" CASCADE;\n"
+                #"CREATE TABLE IF NOT EXISTS \"{4}\".\"{0}\" (LIKE \"{3}\".\"{0}\",\n"
+                "CREATE TABLE \"{4}\".\"{0}\" (LIKE \"{3}\".\"{0}\",\n"
+                "CONSTRAINT pk_{0} PRIMARY KEY (md5_rowhash));\n"
+                #"CREATE TABLE IF NOT EXISTS \"{0}_diff\" (\n"
+                #"difftime TIMESTAMP PRIMARY KEY\n,"
+                #"inserts VARCHAR(32)[], deletes VARCHAR(32)[]);\n"
+                #"INSERT INTO \"{0}_diff\" select now() as difftime, del.array_agg as deletes, ins.array_agg as inserts from\n"
+                #"(select array_agg(d.md5_rowhash) from (select md5_rowhash from \"{0}\" except (select md5_rowhash from publish_view.\"{0}\")) as d) as del,\n"
+                #"(select array_agg(i.md5_rowhash) from (select md5_rowhash from publish_view.\"{0}\" except (select md5_rowhash from \"{0}\")) as i) as ins;\n"
+                #"TRUNCATE \"{4}\".\"{0}\";" # For now don't actually use diff just truncate/full reinsert
+                "INSERT INTO \"{4}\".\"{0}\" SELECT * FROM \"{3}\".\"{0}\";"
+                ).format(self.table_name, timezone.now(),trans_schema,publish_view_schema,publish_schema)
+            cursor.execute(sql)
+    
+            #create extra index
+            if self.create_extra_index_sql and self.create_extra_index_sql.strip():
+                sql = Template(self.create_extra_index_sql).render(Context({"self": self,"publish_schema":publish_schema}))
+                cursor.execute(sql)
+    
+            #create index
+            #print "refresh spatial info for table (id={}, name={})".format(self.id,self.table_name)
+            self.refresh_spatial_info(publish_schema).create_indexes(cursor=cursor)
+        finally:
+            #reset the default timeout
+            cursor.execute(self.set_timeout_sql.format(default_timeout))
+            
 
 
     def _create(self, cursor,schema,input_schema=None,normal_schema=None):
