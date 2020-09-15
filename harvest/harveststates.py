@@ -498,9 +498,10 @@ class DumpFullData(HarvestState):
         """
         self.database = settings.DATABASES["default"]
         self.env = os.environ.copy()
-        self.dump_cmd = ["pg_dump", "-h", self.database["HOST"], "-d", self.database["NAME"], "-U", self.database["USER"], "-b", "-E", "utf-8", "-F", "c","-Z","1", "-w", "-O"]
+        self.dump_cmd = [BorgConfiguration.DATA_DUMP, "-h", self.database["HOST"], "-d", self.database["NAME"], "-U", self.database["USER"], "-b", "-E", "utf-8", "-F", "c","-Z","1", "-w", "-O"]
         if 'PASSWORD' in self.database and  self.database['PASSWORD'].strip():
             self.env["PGPASSWORD"] = self.database["PASSWORD"]
+        self.env["PGSSLMODE"] = "allow"
         if self.database["PORT"]:
             self.dump_cmd += ["-p", str(self.database["PORT"])]
 

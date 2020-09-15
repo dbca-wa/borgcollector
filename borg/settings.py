@@ -192,7 +192,9 @@ HARVEST_CONFIG = {
     "USERLIST_USERNAME": os.environ.get("USERLIST_USERNAME", ""),
     "USERLIST_PASSWORD": os.environ.get("USERLIST_PASSWORD", ""),
     "MASTER_PATH_PREFIX": os.environ.get("MASTER_PATH_PREFIX", ""),
-    "MUDMAP_HOME": os.environ.get("MUDMAP_HOME", os.path.abspath(os.path.join(BASE_DIR,"mudmap")))
+    "MUDMAP_HOME": os.environ.get("MUDMAP_HOME", os.path.abspath(os.path.join(BASE_DIR,"mudmap"))),
+    "DATA_DUMP":os.environ.get("DATA_DUMP") or "pg_dump",
+    "PG_DUMP":os.environ.get("PG_DUMP") or "pg_dump"
 }
 
 # Database

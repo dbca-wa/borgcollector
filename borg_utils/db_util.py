@@ -6,6 +6,8 @@ from sqlalchemy import create_engine
 from django.conf import settings
 from django.db import connection
 
+from borg_utils.borg_config import BorgConfiguration
+
 class _DbUtil(object):
     _query_index_constraint_sql = """
 SELECT s.conname ,s.contype
@@ -54,8 +56,9 @@ WHERE np.nspname='{0}' and ct.relname='{1}'
             self._env = os.environ.copy()
             if self._password:
                 self._env["PGPASSWORD"] = self._password
+            self._env["PGSSLMODE"] = "allow"
 
-            self._table_schema_dump_cmd = ["pg_dump", "-h", self._host, "-d", self._db, "-U", self._user, "-F", "p", "-w", "-x", "-O", "--no-security-labels", "--no-tablespaces", "-s"]
+            self._table_schema_dump_cmd = [BorgConfiguration.PG_DUMP, "-h", self._host, "-d", self._db, "-U", self._user, "-F", "p", "-w", "-x", "-O", "--no-security-labels", "--no-tablespaces", "-s"]
             if self._port:
                 self._table_schema_dump_cmd += ["-p", str(self._port)]
 
