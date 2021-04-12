@@ -1,4 +1,3 @@
-# coding=utf8
 from __future__ import absolute_import, unicode_literals, division
 
 import os
@@ -875,6 +874,7 @@ class Input(JobFields,SpatialTableMixin):
         except ValidationError as e:
             raise e
         except Exception as e:
+            logger.error(traceback.format_exc())
             raise ValidationError(e)
 
     def get_layer_name(self):
@@ -1027,9 +1027,9 @@ class Input(JobFields,SpatialTableMixin):
         else:
             cmd = ["ogrinfo", "-ro","-al","-so", self.vrt.name]
 
-        p = subprocess.Popen(cmd, stdout=subprocess.PIPE,stderr=subprocess.PIPE)
-        output = p.communicate()
-        if p.returncode != 0:
+        pobj = subprocess.Popen(cmd, stdout=subprocess.PIPE,stderr=subprocess.PIPE)
+        output = pobj.communicate()
+        if pobj.returncode != 0:
             error_msg = output[1].replace("ERROR 1: Invalid geometry field index : -1","")
             if error_msg.strip():
                 raise Exception(error_msg)
@@ -1070,7 +1070,7 @@ class Input(JobFields,SpatialTableMixin):
         srid = detect_epsg(self.vrt.name)
         if srid:
             cmd += ['-a_srs', srid]
-        logger.info(" ".join(cmd))
+        #logger.info(" ".join(cmd))
         cancelled = False
         outputFile = None
         errorFile = None
@@ -1080,20 +1080,21 @@ class Input(JobFields,SpatialTableMixin):
             errorFile = tempfile.NamedTemporaryFile(delete=False)
             logger.info("Importing data using ogr2ogr, name={},outputFile={},errorFile={}".format(self.name,outputFile.name,errorFile.name))
             #p = subprocess.Popen(cmd,stdout=subprocess.PIPE,stderr=subprocess.PIPE)
-            p = subprocess.Popen(cmd,stdout=outputFile,stderr=errorFile)
+            pobj = subprocess.Popen(cmd,stdout=outputFile,stderr=errorFile)
             if validation:
                 sleep_time = 0
                 max_sleep_time = BorgConfiguration.MAX_TEST_IMPORT_TIME * 1000
                 finished = False
                 table_exist = False
                 while sleep_time < max_sleep_time or not table_exist:
-                    if p.poll() is not None:
+                    result = pobj.poll()
+                    if result is not None:
                         finished = True
                         break;
     
                     time.sleep(0.2)
                     sleep_time += 200
-                    if not table_exist and sleep_time>= max_sleep_time:
+                    if not table_exist:
                         sql_result = cursor.execute("SELECT count(1) FROM pg_class a JOIN pg_namespace b ON a.relnamespace=b.oid where a.relname='{1}' and b.nspname='{0}'".format(schema,self.name))
                         table_exist = bool(sql_result.fetchone()[0] if sql_result else cursor.fetchone()[0])
     
@@ -1101,14 +1102,21 @@ class Input(JobFields,SpatialTableMixin):
                     logger.info("The data set is too big, terminate the test importing process for '{0}'".format(self.name))
                     cancelled = True
                     try:
-                        p.terminate()
+                        pobj.terminate()
                     except:
                         pass
+
+                if not table_exist:
+                    sql_result = cursor.execute("SELECT count(1) FROM pg_class a JOIN pg_namespace b ON a.relnamespace=b.oid where a.relname='{1}' and b.nspname='{0}'".format(schema,self.name))
+                    table_exist = bool(sql_result.fetchone()[0] if sql_result else cursor.fetchone()[0])
     
-                returncode = p.wait()
+    
+                returncode = pobj.wait()
                 output = (outputFile.read(),errorFile.read())
                 if returncode != signal.SIGTERM * -1 and output[1].strip():
                     raise Exception(output[1])
+                elif not table_exist:
+                    raise Exception("Failed to create table '{}.{}', Check the datasource".format(schema,self.name))
     
             else:
                 sleep_time = 0
@@ -1116,7 +1124,7 @@ class Input(JobFields,SpatialTableMixin):
                 from harvest.jobstates import JobStateOutcome
                 cancelled = False
                 while True:
-                    if p.poll() is not None:
+                    if pobj.poll() is not None:
                         break;
                     time.sleep(0.2)
                     sleep_time += 200
@@ -1127,14 +1135,14 @@ class Input(JobFields,SpatialTableMixin):
                         if job.user_action and job.user_action.lower() == JobStateOutcome.cancelled_by_custodian.lower():
                             #job cancelled
                             try:
-                                p.terminate()
+                                pobj.terminate()
                             except:
                                 pass
                             cancelled = True
                             logger.info("The job({1}) is cancelled, terminate the importing process for '{0}'".format(self.name,job_id))
                             break;
     
-                returncode = p.wait()
+                returncode = pobj.wait()
                 outputFile.seek(0)
                 errorFile.seek(0)
                 output = (outputFile.read(),errorFile.read())
@@ -1143,7 +1151,7 @@ class Input(JobFields,SpatialTableMixin):
                     job.user_action = None
                     self._save_job(cursor,job,["user_action"])
                 else:
-                    if p.returncode != 0:
+                    if pobj.returncode != 0:
                         if output[1].strip() :
                             raise Exception(output[1])
                         else:
@@ -2328,6 +2336,7 @@ class Publish(Transform,ResourceStatusMixin,SpatialTableMixin):
         except ValidationError as e:
             raise e
         except Exception as e:
+            logger.error(traceback.format_exc())
             raise ValidationError(e)
 
     def unpublish(self):
