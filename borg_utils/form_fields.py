@@ -269,6 +269,26 @@ class GeoserverSettingForm(object):
     A form which contain geoserver setting fields
     """
 
+    def is_field_changed(self,name,field):
+        if hasattr(field,"setting_type") and getattr(field,"setting_type") == "geoserver_setting":
+            json_key = field.key if hasattr(field,"key") else field.label
+            if not self.instance.geoserver_setting:
+                val = None
+            elif hasattr(field,"group"):
+                if field.group in self.instance.geoserver_setting and json_key in self.instance.geoserver_setting[field.group]:
+                     val = self.instance.geoserver_setting[field.group][json_key]
+                else:
+                     val = None
+            else:
+                if json_key in self.instance.geoserver_setting:
+                     val = self.instance.geoserver_setting[json_key]
+                else:
+                     val = None
+            return (self.cleaned_data[name] or None) != val
+
+        else:
+            return super(GeoserverSettingForm,self).is_field_changed(name,field)
+
     def get_setting_from_model(self, *args, **kwargs):
         if 'instance' in kwargs and  kwargs['instance']:
             #populate the geoserver settings form fields value from table data

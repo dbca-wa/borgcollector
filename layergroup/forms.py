@@ -7,7 +7,7 @@ from borg_utils.form_fields import GeoserverSettingForm,MetaTilingFactorField,Gr
 from borg_utils.form_fields import GroupedModelChoiceField,BorgSelect
 from borg_utils.resource_status import ResourceStatus
 
-class LayerGroupForm(forms.ModelForm,GeoserverSettingForm):
+class LayerGroupForm(GeoserverSettingForm,forms.ModelForm):
     """
     A form for LayerGroup Model
     """

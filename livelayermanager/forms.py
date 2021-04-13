@@ -6,7 +6,7 @@ from borg_utils.form_fields import GeoserverSettingForm,MetaTilingFactorField,Gr
 from borg_utils.form_fields import GroupedModelChoiceField,BorgSelect
 from borg_utils.forms import BorgModelForm
 
-class DatasourceForm(BorgModelForm,GeoserverSettingForm):
+class DatasourceForm(GeoserverSettingForm,BorgModelForm):
     """
     A form for Datasource model
     """
@@ -52,7 +52,7 @@ class DatasourceForm(BorgModelForm,GeoserverSettingForm):
         fields = "__all__"
 
 
-class LayerForm(BorgModelForm,GeoserverSettingForm):
+class LayerForm(GeoserverSettingForm,BorgModelForm):
     """
     A form for Layer model
     """
@@ -87,7 +87,7 @@ class LayerForm(BorgModelForm,GeoserverSettingForm):
         model = Layer
         fields = "__all__"
 
-class SqlViewLayerForm(BorgModelForm,GeoserverSettingForm):
+class SqlViewLayerForm(GeoserverSettingForm,BorgModelForm):
     """
     A form for SqlViewLayer model
     """
