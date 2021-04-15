@@ -272,16 +272,17 @@ class GeoserverSettingForm(object):
     def is_field_changed(self,name,field):
         if hasattr(field,"setting_type") and getattr(field,"setting_type") == "geoserver_setting":
             json_key = field.key if hasattr(field,"key") else field.label
-            if not self.instance.geoserver_setting:
+            geoserver_setting = json.loads(self.instance.geoserver_setting) if self.instance.geoserver_setting else None
+            if not geoserver_setting:
                 val = None
             elif hasattr(field,"group"):
-                if field.group in self.instance.geoserver_setting and json_key in self.instance.geoserver_setting[field.group]:
-                     val = self.instance.geoserver_setting[field.group][json_key]
+                if field.group in geoserver_setting and json_key in geoserver_setting[field.group]:
+                     val = geoserver_setting[field.group][json_key]
                 else:
                      val = None
             else:
-                if json_key in self.instance.geoserver_setting:
-                     val = self.instance.geoserver_setting[json_key]
+                if json_key in geoserver_setting:
+                     val = geoserver_setting[json_key]
                 else:
                      val = None
             return (self.cleaned_data[name] or None) != val

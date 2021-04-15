@@ -182,7 +182,7 @@ HARVEST_CONFIG = {
     "LIVE_STORE_DIR" : os.path.abspath(os.path.join(DOWNLOAD_ROOT, "live_store")),
     "PREVIEW_DIR" : os.path.abspath(PREVIEW_ROOT),
     "WORKSPACE_AS_SCHEMA" : True,
-    "MAX_TEST_IMPORT_TIME" : 5, #seconds
+    "MAX_TEST_IMPORT_TIME" : int(os.environ.get("MAX_TEST_DATA_IMPORT_TIME") or 300), #seconds
     "RETRY_INTERVAL" : 300, #seconds
     "IMPORT_CANCEL_TIME" : 60, #seconds
     "BORG_STATE_REPOSITORY" : os.environ.get("BORG_STATE_REPOSITORY", os.path.join(BASE_DIR, "borgcollector-state")),

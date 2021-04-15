@@ -1061,12 +1061,17 @@ class Input(JobFields,SpatialTableMixin):
         database = "PG:dbname='{NAME}' host='{HOST}' port='{PORT}'  user='{USER}' password='{PASSWORD}'".format(**settings.DATABASES["default"])
         table = "{0}.{1}".format(schema,self.name)
         cursor.execute("CREATE EXTENSION IF NOT EXISTS postgis;")
-        cmd = ["ogr2ogr", "-overwrite", "-gt", "20000", "-preserve_fid", "-skipfailures", "--config", "PG_USE_COPY", "YES",
-            "-f", "PostgreSQL", database, self.vrt.name, "-nln", table, "-nlt", "PROMOTE_TO_MULTI", self.layer]
+        if validation:
+            cmd = ["ogr2ogr", "-overwrite", "-gt", "1", "-preserve_fid", "-skipfailures", "--config", "PG_USE_COPY", "YES",
+                "-f", "PostgreSQL", database, self.vrt.name, "-nln", table, "-nlt", "PROMOTE_TO_MULTI", self.layer]
+        else:
+            cmd = ["ogr2ogr", "-overwrite", "-gt", "20000", "-preserve_fid", "-skipfailures", "--config", "PG_USE_COPY", "YES",
+                "-f", "PostgreSQL", database, self.vrt.name, "-nln", table, "-nlt", "PROMOTE_TO_MULTI", self.layer]
 
         if self.advanced_options:
             cmd += self.advanced_options.split()
 
+        logger.info("Try to detect spatial refernce system")
         srid = detect_epsg(self.vrt.name)
         if srid:
             cmd += ['-a_srs', srid]
@@ -1075,6 +1080,7 @@ class Input(JobFields,SpatialTableMixin):
         outputFile = None
         errorFile = None
         output = None
+        rows_sql = "SELECT count(1) FROM \"{0}\".\"{1}\"".format(schema,self.name)
         try:
             outputFile = tempfile.NamedTemporaryFile(delete=False)
             errorFile = tempfile.NamedTemporaryFile(delete=False)
@@ -1085,8 +1091,9 @@ class Input(JobFields,SpatialTableMixin):
                 sleep_time = 0
                 max_sleep_time = BorgConfiguration.MAX_TEST_IMPORT_TIME * 1000
                 finished = False
-                table_exist = False
-                while sleep_time < max_sleep_time or not table_exist:
+                cursor.execute("drop table if exists \"{0}.{1}\";".format(schema,self.name))
+                rows = 0
+                while sleep_time < max_sleep_time and rows == 0:
                     result = pobj.poll()
                     if result is not None:
                         finished = True
@@ -1094,9 +1101,13 @@ class Input(JobFields,SpatialTableMixin):
     
                     time.sleep(0.2)
                     sleep_time += 200
-                    if not table_exist:
-                        sql_result = cursor.execute("SELECT count(1) FROM pg_class a JOIN pg_namespace b ON a.relnamespace=b.oid where a.relname='{1}' and b.nspname='{0}'".format(schema,self.name))
-                        table_exist = bool(sql_result.fetchone()[0] if sql_result else cursor.fetchone()[0])
+                    if rows  == 0:
+                        try:
+                            sql_result = cursor.execute(rows_sql)
+                            rows = sql_result.fetchone()[0] if sql_result else cursor.fetchone()[0]
+                        except :
+                            #table doesn't exist
+                            pass
     
                 if not finished:
                     logger.info("The data set is too big, terminate the test importing process for '{0}'".format(self.name))
@@ -1106,16 +1117,23 @@ class Input(JobFields,SpatialTableMixin):
                     except:
                         pass
 
-                if not table_exist:
-                    sql_result = cursor.execute("SELECT count(1) FROM pg_class a JOIN pg_namespace b ON a.relnamespace=b.oid where a.relname='{1}' and b.nspname='{0}'".format(schema,self.name))
-                    table_exist = bool(sql_result.fetchone()[0] if sql_result else cursor.fetchone()[0])
-    
-    
                 returncode = pobj.wait()
+
+                if rows == 0:
+                    try:
+                        sql_result = cursor.execute(rows_sql)
+                        rows = sql_result.fetchone()[0] if sql_result else cursor.fetchone()[0]
+                    except:
+                        #table doesn't exist
+                        pass
+
+                if rows > 0:
+                    return
+
                 output = (outputFile.read(),errorFile.read())
                 if returncode != signal.SIGTERM * -1 and output[1].strip():
                     raise Exception(output[1])
-                elif not table_exist:
+                else:
                     raise Exception("Failed to create table '{}.{}', Check the datasource".format(schema,self.name))
     
             else:
@@ -2296,7 +2314,6 @@ class Publish(Transform,ResourceStatusMixin,SpatialTableMixin):
 
         if not self.input_table and not any(self.relations):
             raise ValidationError("Must specify input or dependencies or both.")
-
         try:
             #drop transform functions, but not drop related tables
             super(Publish,self).drop(cursor,schema)
