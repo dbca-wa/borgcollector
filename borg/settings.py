@@ -182,7 +182,7 @@ HARVEST_CONFIG = {
     "LIVE_STORE_DIR" : os.path.abspath(os.path.join(DOWNLOAD_ROOT, "live_store")),
     "PREVIEW_DIR" : os.path.abspath(PREVIEW_ROOT),
     "WORKSPACE_AS_SCHEMA" : True,
-    "MAX_TEST_IMPORT_TIME" : 5, #seconds
+    "MAX_TEST_IMPORT_TIME" : int(os.environ.get("MAX_TEST_DATA_IMPORT_TIME") or 300), #seconds
     "RETRY_INTERVAL" : 300, #seconds
     "IMPORT_CANCEL_TIME" : 60, #seconds
     "BORG_STATE_REPOSITORY" : os.environ.get("BORG_STATE_REPOSITORY", os.path.join(BASE_DIR, "borgcollector-state")),
@@ -192,7 +192,9 @@ HARVEST_CONFIG = {
     "USERLIST_USERNAME": os.environ.get("USERLIST_USERNAME", ""),
     "USERLIST_PASSWORD": os.environ.get("USERLIST_PASSWORD", ""),
     "MASTER_PATH_PREFIX": os.environ.get("MASTER_PATH_PREFIX", ""),
-    "MUDMAP_HOME": os.environ.get("MUDMAP_HOME", os.path.abspath(os.path.join(BASE_DIR,"mudmap")))
+    "MUDMAP_HOME": os.environ.get("MUDMAP_HOME", os.path.abspath(os.path.join(BASE_DIR,"mudmap"))),
+    "DATA_DUMP":os.environ.get("DATA_DUMP") or "pg_dump",
+    "PG_DUMP":os.environ.get("PG_DUMP") or "pg_dump"
 }
 
 # Database

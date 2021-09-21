@@ -71,6 +71,8 @@ class BorgModelForm(django.forms.ModelForm):
             except ValidationError as e:
                 self.add_error(name, e)
 
+    def is_field_changed(self,name,field):
+        return hasattr(self.instance,name) and (self.cleaned_data[name] or None) != (getattr(self.instance,name) or None)
 
     def _post_clean(self):
         opts = self._meta
@@ -79,9 +81,9 @@ class BorgModelForm(django.forms.ModelForm):
             if self.instance.pk:
                 #save request, check whether it is changed or not
                 changed_fields = set()
-                for field in self.base_fields.keys():
-                    if hasattr(self.instance,field) and (self.cleaned_data[field] or None) != (getattr(self.instance,field) or None):
-                        changed_fields.add(field)
+                for name,field in self.base_fields.items():
+                    if self.is_field_changed(name,field):
+                        changed_fields.add(name)
 
                 self.instance.changed_fields = changed_fields
             else:

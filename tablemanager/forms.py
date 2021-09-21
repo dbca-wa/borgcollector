@@ -245,7 +245,7 @@ class NormaliseForm(BorgModelForm):
         model = Normalise
         fields = ('name','input_table','dependents','output_table','sql')
 
-class PublishForm(BorgModelForm,GeoserverSettingForm):
+class PublishForm(GeoserverSettingForm,BorgModelForm):
     """
     A form for normal table's Publish Model
     """

@@ -1,4 +1,3 @@
-# coding=utf8
 from __future__ import absolute_import, unicode_literals, division
 
 import os
@@ -66,6 +65,7 @@ slug_re = re.compile(r'^[a-z_][a-z0-9_]+$')
 validate_slug = RegexValidator(slug_re, "Slug can only start with lowercase letters or underscore, and contain lowercase letters, numbers and underscore", "invalid")
 
 def in_schema(search, db_url=None,input_schema=None,trans_schema=None,normal_schema=None):
+    cursor = None
     try:
         if db_url:
             cursor = create_engine(db_url).connect()
@@ -357,6 +357,7 @@ class ForeignTable(BorgModel):
     name = models.SlugField(max_length=255, unique=True, help_text="The name of foreign table", validators=[validate_slug])
     server = models.ForeignKey(DataSource,limit_choices_to={"type":DatasourceType.DATABASE})
     sql = SQLField(default="CREATE FOREIGN TABLE \"{{schema}}\".\"{{self.name}}\" (<columns>) SERVER {{self.server.name}} OPTIONS (schema '<schema>', table '<table>');")
+    table_md5_support = models.BooleanField(null=False, default=True, help_text="If true, table md5 is used to check whether the data source is up to date.")
     last_modify_time = models.DateTimeField(auto_now=False,auto_now_add=True,editable=False,null=False)
 
     ROW_COUNT_SQL = "SELECT COUNT(*) FROM \"{0}\".\"{1}\";"
@@ -730,12 +731,13 @@ class Input(JobFields,SpatialTableMixin):
                     elif job.job_type == JobInterval.Triggered.name:
                         return False
                     elif job.batch_id:
-                        if "table_md5" in self.importing_dict and "row_count" in self.importing_dict:
+                        if "row_count" in self.importing_dict:
                             if self.foreign_table.table_row_count() != self.importing_dict["row_count"]:
                                 #inputing table has different number of rows with inputed table
                                 self.importing_info = None
                                 self.save(update_fields=['importing_info'])
                                 return False
+                        if self.foreign_table.table_md5_support and "table_md5" in self.importing_dict :
                             if self.foreign_table.table_md5() == self.importing_dict["table_md5"]:
                                 self.importing_dict["check_job_id"] = job.id
                                 self.importing_dict["check_batch_id"] = job.batch_id
@@ -873,6 +875,7 @@ class Input(JobFields,SpatialTableMixin):
         except ValidationError as e:
             raise e
         except Exception as e:
+            logger.error(traceback.format_exc())
             raise ValidationError(e)
 
     def get_layer_name(self):
@@ -1025,9 +1028,9 @@ class Input(JobFields,SpatialTableMixin):
         else:
             cmd = ["ogrinfo", "-ro","-al","-so", self.vrt.name]
 
-        p = subprocess.Popen(cmd, stdout=subprocess.PIPE,stderr=subprocess.PIPE)
-        output = p.communicate()
-        if p.returncode != 0:
+        pobj = subprocess.Popen(cmd, stdout=subprocess.PIPE,stderr=subprocess.PIPE)
+        output = pobj.communicate()
+        if pobj.returncode != 0:
             error_msg = output[1].replace("ERROR 1: Invalid geometry field index : -1","")
             if error_msg.strip():
                 raise Exception(error_msg)
@@ -1059,54 +1062,80 @@ class Input(JobFields,SpatialTableMixin):
         database = "PG:dbname='{NAME}' host='{HOST}' port='{PORT}'  user='{USER}' password='{PASSWORD}'".format(**settings.DATABASES["default"])
         table = "{0}.{1}".format(schema,self.name)
         cursor.execute("CREATE EXTENSION IF NOT EXISTS postgis;")
-        cmd = ["ogr2ogr", "-overwrite", "-gt", "20000", "-preserve_fid", "-skipfailures", "--config", "PG_USE_COPY", "YES",
-            "-f", "PostgreSQL", database, self.vrt.name, "-nln", table, "-nlt", "PROMOTE_TO_MULTI", self.layer]
+        if validation:
+            cmd = ["ogr2ogr", "-overwrite", "-gt", "1", "-preserve_fid", "-skipfailures", "--config", "PG_USE_COPY", "YES",
+                "-f", "PostgreSQL", database, self.vrt.name, "-nln", table, "-nlt", "PROMOTE_TO_MULTI", self.layer]
+        else:
+            cmd = ["ogr2ogr", "-overwrite", "-gt", "20000", "-preserve_fid", "-skipfailures", "--config", "PG_USE_COPY", "YES",
+                "-f", "PostgreSQL", database, self.vrt.name, "-nln", table, "-nlt", "PROMOTE_TO_MULTI", self.layer]
 
         if self.advanced_options:
             cmd += self.advanced_options.split()
 
+        logger.info("Try to detect spatial refernce system")
         srid = detect_epsg(self.vrt.name)
         if srid:
             cmd += ['-a_srs', srid]
-        logger.info(" ".join(cmd))
+        #logger.info(" ".join(cmd))
         cancelled = False
         outputFile = None
         errorFile = None
         output = None
+        rows_sql = "SELECT count(1) FROM \"{0}\".\"{1}\"".format(schema,self.name)
         try:
             outputFile = tempfile.NamedTemporaryFile(delete=False)
             errorFile = tempfile.NamedTemporaryFile(delete=False)
             logger.info("Importing data using ogr2ogr, name={},outputFile={},errorFile={}".format(self.name,outputFile.name,errorFile.name))
             #p = subprocess.Popen(cmd,stdout=subprocess.PIPE,stderr=subprocess.PIPE)
-            p = subprocess.Popen(cmd,stdout=outputFile,stderr=errorFile)
+            pobj = subprocess.Popen(cmd,stdout=outputFile,stderr=errorFile)
             if validation:
                 sleep_time = 0
                 max_sleep_time = BorgConfiguration.MAX_TEST_IMPORT_TIME * 1000
                 finished = False
-                table_exist = False
-                while sleep_time < max_sleep_time or not table_exist:
-                    if p.poll() is not None:
+                cursor.execute("drop table if exists \"{0}.{1}\";".format(schema,self.name))
+                rows = 0
+                while sleep_time < max_sleep_time and rows == 0:
+                    result = pobj.poll()
+                    if result is not None:
                         finished = True
                         break;
     
                     time.sleep(0.2)
                     sleep_time += 200
-                    if not table_exist and sleep_time>= max_sleep_time:
-                        sql_result = cursor.execute("SELECT count(1) FROM pg_class a JOIN pg_namespace b ON a.relnamespace=b.oid where a.relname='{1}' and b.nspname='{0}'".format(schema,self.name))
-                        table_exist = bool(sql_result.fetchone()[0] if sql_result else cursor.fetchone()[0])
+                    if rows  == 0:
+                        try:
+                            sql_result = cursor.execute(rows_sql)
+                            rows = sql_result.fetchone()[0] if sql_result else cursor.fetchone()[0]
+                        except :
+                            #table doesn't exist
+                            pass
     
                 if not finished:
                     logger.info("The data set is too big, terminate the test importing process for '{0}'".format(self.name))
                     cancelled = True
                     try:
-                        p.terminate()
+                        pobj.terminate()
                     except:
                         pass
-    
-                returncode = p.wait()
+
+                returncode = pobj.wait()
+
+                if rows == 0:
+                    try:
+                        sql_result = cursor.execute(rows_sql)
+                        rows = sql_result.fetchone()[0] if sql_result else cursor.fetchone()[0]
+                    except:
+                        #table doesn't exist
+                        pass
+
+                if rows > 0:
+                    return
+
                 output = (outputFile.read(),errorFile.read())
                 if returncode != signal.SIGTERM * -1 and output[1].strip():
                     raise Exception(output[1])
+                else:
+                    raise Exception("Failed to create table '{}.{}', Check the datasource".format(schema,self.name))
     
             else:
                 sleep_time = 0
@@ -1114,7 +1143,7 @@ class Input(JobFields,SpatialTableMixin):
                 from harvest.jobstates import JobStateOutcome
                 cancelled = False
                 while True:
-                    if p.poll() is not None:
+                    if pobj.poll() is not None:
                         break;
                     time.sleep(0.2)
                     sleep_time += 200
@@ -1125,14 +1154,14 @@ class Input(JobFields,SpatialTableMixin):
                         if job.user_action and job.user_action.lower() == JobStateOutcome.cancelled_by_custodian.lower():
                             #job cancelled
                             try:
-                                p.terminate()
+                                pobj.terminate()
                             except:
                                 pass
                             cancelled = True
                             logger.info("The job({1}) is cancelled, terminate the importing process for '{0}'".format(self.name,job_id))
                             break;
     
-                returncode = p.wait()
+                returncode = pobj.wait()
                 outputFile.seek(0)
                 errorFile.seek(0)
                 output = (outputFile.read(),errorFile.read())
@@ -1141,7 +1170,7 @@ class Input(JobFields,SpatialTableMixin):
                     job.user_action = None
                     self._save_job(cursor,job,["user_action"])
                 else:
-                    if p.returncode != 0:
+                    if pobj.returncode != 0:
                         if output[1].strip() :
                             raise Exception(output[1])
                         else:
@@ -1186,7 +1215,8 @@ class Input(JobFields,SpatialTableMixin):
     def _post_execute(self,cursor):
         if self.foreign_table:
             self.importing_dict["row_count"] = self.foreign_table.table_row_count()
-            self.importing_dict["table_md5"] = self.foreign_table.table_md5()
+            if self.foreign_table.table_md5_support:
+                self.importing_dict["table_md5"] = self.foreign_table.table_md5()
             if "check_job_id" in self.importing_dict: del self.importing_dict["check_job_id"]
             if "check_batch_id" in self.importing_dict: del self.importing_dict["check_batch_id"]
             #import ipdb;ipdb.set_trace()
@@ -2188,6 +2218,8 @@ class Publish(Transform,ResourceStatusMixin,SpatialTableMixin):
         cursor.execute("DROP TABLE IF EXISTS \"{0}\".\"{1}\" CASCADE;".format(publish_schema,self.table_name))
         super(Publish,self).drop(cursor,transform_schema)
 
+    get_timeout_sql = "show statement_timeout"
+    set_timeout_sql = "set statement_timeout to '{}'"
     def invoke(self, cursor,trans_schema,normal_schema,publish_view_schema,publish_schema):
         """
         invoke the function to populate the table data in speicifed schema
@@ -2198,32 +2230,41 @@ class Publish(Transform,ResourceStatusMixin,SpatialTableMixin):
         #drop all indexes except primary key
         #defaultDbUtil.drop_all_indexes(self.table_name,publish_schema,False)
 
-        sql = "CREATE OR REPLACE VIEW \"{3}\".\"{0}\" AS SELECT *, md5(CAST(row.* AS text)) as md5_rowhash FROM \"{2}\".\"{1}\"() as row;".format(self.table_name,self.func_name,trans_schema,publish_view_schema)
-        cursor.execute(sql)
-        sql = (
-            "DROP TABLE IF EXISTS \"{4}\".\"{0}\" CASCADE;\n"
-            #"CREATE TABLE IF NOT EXISTS \"{4}\".\"{0}\" (LIKE \"{3}\".\"{0}\",\n"
-            "CREATE TABLE \"{4}\".\"{0}\" (LIKE \"{3}\".\"{0}\",\n"
-            "CONSTRAINT pk_{0} PRIMARY KEY (md5_rowhash));\n"
-            #"CREATE TABLE IF NOT EXISTS \"{0}_diff\" (\n"
-            #"difftime TIMESTAMP PRIMARY KEY\n,"
-            #"inserts VARCHAR(32)[], deletes VARCHAR(32)[]);\n"
-            #"INSERT INTO \"{0}_diff\" select now() as difftime, del.array_agg as deletes, ins.array_agg as inserts from\n"
-            #"(select array_agg(d.md5_rowhash) from (select md5_rowhash from \"{0}\" except (select md5_rowhash from publish_view.\"{0}\")) as d) as del,\n"
-            #"(select array_agg(i.md5_rowhash) from (select md5_rowhash from publish_view.\"{0}\" except (select md5_rowhash from \"{0}\")) as i) as ins;\n"
-            #"TRUNCATE \"{4}\".\"{0}\";" # For now don't actually use diff just truncate/full reinsert
-            "INSERT INTO \"{4}\".\"{0}\" SELECT * FROM \"{3}\".\"{0}\";"
-            ).format(self.table_name, timezone.now(),trans_schema,publish_view_schema,publish_schema)
-        cursor.execute(sql)
-
-        #create extra index
-        if self.create_extra_index_sql and self.create_extra_index_sql.strip():
-            sql = Template(self.create_extra_index_sql).render(Context({"self": self,"publish_schema":publish_schema}))
+        cursor.execute(self.get_timeout_sql)
+        default_timeout = cursor.fetchone()[0]
+        try:
+            #clear the statement timeout
+            cursor.execute(self.set_timeout_sql.format("0"))
+            sql = "CREATE OR REPLACE VIEW \"{3}\".\"{0}\" AS SELECT *, md5(CAST(row.* AS text)) as md5_rowhash FROM \"{2}\".\"{1}\"() as row;".format(self.table_name,self.func_name,trans_schema,publish_view_schema)
             cursor.execute(sql)
-
-        #create index
-        #print "refresh spatial info for table (id={}, name={})".format(self.id,self.table_name)
-        self.refresh_spatial_info(publish_schema).create_indexes()
+            sql = (
+                "DROP TABLE IF EXISTS \"{4}\".\"{0}\" CASCADE;\n"
+                #"CREATE TABLE IF NOT EXISTS \"{4}\".\"{0}\" (LIKE \"{3}\".\"{0}\",\n"
+                "CREATE TABLE \"{4}\".\"{0}\" (LIKE \"{3}\".\"{0}\",\n"
+                "CONSTRAINT pk_{0} PRIMARY KEY (md5_rowhash));\n"
+                #"CREATE TABLE IF NOT EXISTS \"{0}_diff\" (\n"
+                #"difftime TIMESTAMP PRIMARY KEY\n,"
+                #"inserts VARCHAR(32)[], deletes VARCHAR(32)[]);\n"
+                #"INSERT INTO \"{0}_diff\" select now() as difftime, del.array_agg as deletes, ins.array_agg as inserts from\n"
+                #"(select array_agg(d.md5_rowhash) from (select md5_rowhash from \"{0}\" except (select md5_rowhash from publish_view.\"{0}\")) as d) as del,\n"
+                #"(select array_agg(i.md5_rowhash) from (select md5_rowhash from publish_view.\"{0}\" except (select md5_rowhash from \"{0}\")) as i) as ins;\n"
+                #"TRUNCATE \"{4}\".\"{0}\";" # For now don't actually use diff just truncate/full reinsert
+                "INSERT INTO \"{4}\".\"{0}\" SELECT * FROM \"{3}\".\"{0}\";"
+                ).format(self.table_name, timezone.now(),trans_schema,publish_view_schema,publish_schema)
+            cursor.execute(sql)
+    
+            #create extra index
+            if self.create_extra_index_sql and self.create_extra_index_sql.strip():
+                sql = Template(self.create_extra_index_sql).render(Context({"self": self,"publish_schema":publish_schema}))
+                cursor.execute(sql)
+    
+            #create index
+            #print "refresh spatial info for table (id={}, name={})".format(self.id,self.table_name)
+            self.refresh_spatial_info(publish_schema).create_indexes(cursor=cursor)
+        finally:
+            #reset the default timeout
+            cursor.execute(self.set_timeout_sql.format(default_timeout))
+            
 
 
     def _create(self, cursor,schema,input_schema=None,normal_schema=None):
@@ -2274,7 +2315,6 @@ class Publish(Transform,ResourceStatusMixin,SpatialTableMixin):
 
         if not self.input_table and not any(self.relations):
             raise ValidationError("Must specify input or dependencies or both.")
-
         try:
             #drop transform functions, but not drop related tables
             super(Publish,self).drop(cursor,schema)
@@ -2314,6 +2354,7 @@ class Publish(Transform,ResourceStatusMixin,SpatialTableMixin):
         except ValidationError as e:
             raise e
         except Exception as e:
+            logger.error(traceback.format_exc())
             raise ValidationError(e)
 
     def unpublish(self):

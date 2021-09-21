@@ -5,7 +5,7 @@ from wmsmanager.models import WmsServer,WmsLayer
 from borg_utils.form_fields import GeoserverSettingForm,MetaTilingFactorField,GridSetField
 from borg_utils.form_fields import GroupedModelChoiceField,BorgSelect
 
-class WmsServerForm(forms.ModelForm,GeoserverSettingForm):
+class WmsServerForm(GeoserverSettingForm,forms.ModelForm):
     """
     A form for WmsServer model
     """
@@ -51,7 +51,7 @@ class WmsServerForm(forms.ModelForm,GeoserverSettingForm):
         fields = "__all__"
 
 
-class WmsLayerForm(forms.ModelForm,GeoserverSettingForm):
+class WmsLayerForm(GeoserverSettingForm,forms.ModelForm):
     """
     A form for WmsLayer model
     """
