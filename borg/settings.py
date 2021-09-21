@@ -71,7 +71,7 @@ INSTALLED_APPS = (
     'layergroup',
     'monitor',
     'borg_utils',
-    'dpaw_utils'
+    'dbca_utils'
 )
 
 #from ldap_email_auth import ldap_default_settings
@@ -85,7 +85,7 @@ MIDDLEWARE_CLASSES = (
     'django.contrib.sessions.middleware.SessionMiddleware',
     'django.middleware.common.CommonMiddleware',
     'django.contrib.auth.middleware.AuthenticationMiddleware',
-    'dpaw_utils.middleware.SSOLoginMiddleware',
+    'dbca_utils.middleware.SSOLoginMiddleware',
     'django.contrib.messages.middleware.MessageMiddleware',
     'django.middleware.clickjacking.XFrameOptionsMiddleware',
 )
