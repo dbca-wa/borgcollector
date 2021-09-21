@@ -65,6 +65,7 @@ slug_re = re.compile(r'^[a-z_][a-z0-9_]+$')
 validate_slug = RegexValidator(slug_re, "Slug can only start with lowercase letters or underscore, and contain lowercase letters, numbers and underscore", "invalid")
 
 def in_schema(search, db_url=None,input_schema=None,trans_schema=None,normal_schema=None):
+    cursor = None
     try:
         if db_url:
             cursor = create_engine(db_url).connect()
