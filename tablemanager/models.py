@@ -81,6 +81,9 @@ def in_schema(search, db_url=None,input_schema=None,trans_schema=None,normal_sch
         sql = ";".join(["CREATE SCHEMA IF NOT EXISTS \"{}\"".format(s) for s in schemas])
 
         cursor.execute(sql)
+    except :
+        #logger.error("Failed to call 'in_schema'.{}".format(traceback.format_exc()))
+        pass
     finally:
         close_cursor(cursor)
     sql = None

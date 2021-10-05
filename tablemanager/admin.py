@@ -879,12 +879,14 @@ class PublishAdmin(VersionAdmin,JobFields):
         del actions['delete_selected']
         actions['delete_selected'] = (PublishAdmin.custom_delete_selected,self.default_delete_action[1],self.default_delete_action[2])
         return actions 
-
-site.register(Workspace, WorkspaceAdmin)
-site.register(ForeignTable, ForeignTableAdmin)
-site.register(Input, InputAdmin)
-site.register(Publish, PublishAdmin)
-site.register(Normalise, NormaliseAdmin)
-site.register(NormalTable, NormalTableAdmin)
-site.register(PublishChannel, PublishChannelAdmin)
-site.register(DataSource, DataSourceAdmin)
+try:
+    site.register(Workspace, WorkspaceAdmin)
+    site.register(ForeignTable, ForeignTableAdmin)
+    site.register(Input, InputAdmin)
+    site.register(Publish, PublishAdmin)
+    site.register(Normalise, NormaliseAdmin)
+    site.register(NormalTable, NormalTableAdmin)
+    site.register(PublishChannel, PublishChannelAdmin)
+    site.register(DataSource, DataSourceAdmin)
+except:
+    pass
