@@ -207,7 +207,7 @@ class AbstractWmsLayerAdmin(admin.ModelAdmin):
 
     def _legend(self,o):
         if o.legend:
-            return "<a target='_blank' href='/api/legends/{}/{}/'>{}</a>".format(o.server.pk,o.name,o.legend)
+            return "<a target='_blank' href='{0}'>{0}</a>".format(o.legend)
         else:
             return ""
     _legend.allow_tags = True
