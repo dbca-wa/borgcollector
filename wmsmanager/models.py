@@ -505,12 +505,12 @@ class WmsLayer(models.Model,ResourceStatusMixin,TransactionMixin):
             meta_data["ows_resource"]["gwc_endpoint"] = self.server.workspace.publish_channel.gwc_endpoint
 
         if self.legend:
-            try:
-                res = requests.get(self.legend,auth=(self.server.user,self.server.password))
-                res.raise_for_status()
+            res = requests.get(self.legend,auth=(self.server.user,self.server.password))
+            res.raise_for_status()
+            if "ServiceException" in res.content:
+                raise Exception(res.content)
+            else:
                 meta_data["source_legend"] = {"content":res.content.encode("base64"),"ext":mimetypes.guess_extension(res.headers.get("content-type",None))}
-            except:
-                logger.error(traceback.format_exc())
                 
 
         return meta_data

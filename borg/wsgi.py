@@ -11,7 +11,10 @@ import os
 os.environ.setdefault("DJANGO_SETTINGS_MODULE", "borg.settings")
 
 import confy
-confy.read_environment_file(".env")
+try:
+    confy.read_environment_file(".env")
+except:
+    pass
 
 from django.core.wsgi import get_wsgi_application
 application = get_wsgi_application()

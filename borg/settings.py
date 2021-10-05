@@ -12,13 +12,14 @@ https://docs.djangoproject.com/en/1.7/ref/settings/
 import os
 import dj_database_url
 import logging
+import traceback
 
 from django.db import connection
 
 BASE_DIR = os.path.dirname(os.path.dirname(__file__))
 
 # define the following in the environment
-SECRET_KEY = os.environ.get('SECRET_KEY', '')
+SECRET_KEY = os.environ.get('SECRET_KEY', 'dsvak290312kla9023')
 FDW_URL = os.environ.get('FDW_URL', '')
 DEBUG = str(os.environ.get('DEBUG') or 'false').lower() in ("true","on","yes","y","t")
 FDW_URL_SETTINGS = None
@@ -71,7 +72,7 @@ INSTALLED_APPS = (
     'layergroup',
     'monitor',
     'borg_utils',
-    'dpaw_utils'
+    'dbca_utils'
 )
 
 #from ldap_email_auth import ldap_default_settings
@@ -85,7 +86,7 @@ MIDDLEWARE_CLASSES = (
     'django.contrib.sessions.middleware.SessionMiddleware',
     'django.middleware.common.CommonMiddleware',
     'django.contrib.auth.middleware.AuthenticationMiddleware',
-    'dpaw_utils.middleware.SSOLoginMiddleware',
+    'dbca_utils.middleware.SSOLoginMiddleware',
     'django.contrib.messages.middleware.MessageMiddleware',
     'django.middleware.clickjacking.XFrameOptionsMiddleware',
 )
@@ -159,11 +160,13 @@ logging.basicConfig(
     format = '%(asctime)s %(levelname)s %(message)s',
 )
 
-DOWNLOAD_ROOT = os.path.join(BASE_DIR,'download')
+DOWNLOAD_ROOT = os.environ.get('DOWNLOAD_ROOT',os.path.join(BASE_DIR,'download'))
 DOWNLOAD_URL = '/download/'
 
-PREVIEW_ROOT = os.path.join(BASE_DIR,'preview')
+PREVIEW_ROOT = os.environ.get('PREVIEW_ROOT',os.path.join(BASE_DIR,'preview'))
 PREVIEW_URL = '/preview/'
+
+UWSGI_CACHE_FALLBACK=True
 
 HARVEST_CONFIG = {
     "BORG_SCHEMA" : os.environ.get("BORG_SCHEMA") or "public",
@@ -199,15 +202,19 @@ HARVEST_CONFIG = {
 
 # Database
 # https://docs.djangoproject.com/en/1.7/ref/settings/#databases
-DATABASES = {'default': dict(dj_database_url.config(),
-                            **{
-                                'OPTIONS':{
-                                    'options' : '-c search_path=' + HARVEST_CONFIG['BORG_SCHEMA']
+try:
+    DATABASES = {'default': dict(dj_database_url.config(),
+                                **{
+                                    'OPTIONS':{
+                                        'options' : '-c search_path=' + HARVEST_CONFIG['BORG_SCHEMA']
+                                    }
                                 }
-                            }
-                            )}
-cursor = connection.cursor()
-cursor.execute("CREATE SCHEMA IF NOT EXISTS {0}".format(HARVEST_CONFIG['BORG_SCHEMA']))
-cursor.close()
-cursor = None
+                                )}
+    cursor = connection.cursor()
+    cursor.execute("CREATE SCHEMA IF NOT EXISTS {0}".format(HARVEST_CONFIG['BORG_SCHEMA']))
+    cursor.close()
+    cursor = None
+except:
+    #traceback.print_exc()
+    pass
 
