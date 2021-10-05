@@ -18,3 +18,4 @@ gevent==1.4.0
 django-wsgiserver==0.8.0rc1
 django-uwsgi[uwsgi]==0.2.2
 django-uwsgi-cache==1.0.1
+urllib3>=1.26.5 # not directly required, pinned by Snyk to avoid a vulnerability
