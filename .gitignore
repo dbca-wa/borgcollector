@@ -14,6 +14,7 @@ master
 preview
 borgcollector-state
 mudmap
+build_image.sh
 
 # Database/fixture dumps
 *.pgdump

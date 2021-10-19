@@ -28,7 +28,7 @@ from django.utils import timezone
 from django.utils.encoding import force_text, python_2_unicode_compatible
 from django.db.models.signals import pre_save, pre_delete,post_save,post_delete
 from django.dispatch import receiver
-from django.core.exceptions import ValidationError,ObjectDoesNotExist
+from django.core.exceptions import ValidationError,ObjectDoesNotExist,ImproperlyConfigured
 from django.core.validators import RegexValidator
 from django.template import Context, Template
 from django.contrib import messages
@@ -81,8 +81,7 @@ def in_schema(search, db_url=None,input_schema=None,trans_schema=None,normal_sch
         sql = ";".join(["CREATE SCHEMA IF NOT EXISTS \"{}\"".format(s) for s in schemas])
 
         cursor.execute(sql)
-    except :
-        #logger.error("Failed to call 'in_schema'.{}".format(traceback.format_exc()))
+    except ImproperlyConfigured as ex:
         pass
     finally:
         close_cursor(cursor)
@@ -111,6 +110,8 @@ def in_schema(search, db_url=None,input_schema=None,trans_schema=None,normal_sch
                 if normal_schema: kwargs["normal_schema"] = normal_schema
 
                 result = func(*args, **kwargs)
+            except ImproperlyConfigured as ex:
+                pass
             finally:
                 if cursor:
                     cursor.execute("SET search_path TO {0};".format(BorgConfiguration.BORG_SCHEMA))
