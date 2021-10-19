@@ -221,6 +221,9 @@ class JobState(Singleton):
         if state is correct, return the job state instance.
         otherwise throw exception
         """
+        if not state:
+            return None
+
         if isinstance(state, JobState):
             #state is a job state instance, return directly
             return state
