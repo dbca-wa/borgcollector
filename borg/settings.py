@@ -168,6 +168,20 @@ PREVIEW_URL = '/preview/'
 
 UWSGI_CACHE_FALLBACK=True
 
+PG_VERSION = lambda v: client[0][0] * 1000000 + (client[0][1] if len(client[0]) >= 2 else 999) * 1000 + (client[0][2] if len(client[0]) >= 3 else 999)
+pg_clients = os.environ.get("PG_CLIENTS")
+if pg_clients:
+    pg_clients = [ [d for d in v.split("=")]  for v in pg_clients.split(",") if v and v.strip()]
+    for client in pg_clients:
+        client[0] = [int(i) for i in client[0].split(".")]
+        client[0] = PG_VERSION(client[0])
+        if client[1][-1] == "/":
+            client[1] = client[1][:-1]
+
+    pg_clients.sort(key=lambda o:o[0])
+else:
+    pg_clients = None
+
 HARVEST_CONFIG = {
     "BORG_SCHEMA" : os.environ.get("BORG_SCHEMA") or "public",
     "ROWID_COLUMN" : "_rowid",
@@ -197,7 +211,7 @@ HARVEST_CONFIG = {
     "MASTER_PATH_PREFIX": os.environ.get("MASTER_PATH_PREFIX", ""),
     "MUDMAP_HOME": os.environ.get("MUDMAP_HOME", os.path.abspath(os.path.join(BASE_DIR,"mudmap"))),
     "DATA_DUMP":os.environ.get("DATA_DUMP") or "pg_dump",
-    "PG_DUMP":os.environ.get("PG_DUMP") or "pg_dump"
+    "PG_CLIENTS":pg_clients
 }
 
 # Database

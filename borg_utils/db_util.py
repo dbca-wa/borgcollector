@@ -1,4 +1,5 @@
 import tempfile
+import re
 import os
 import subprocess
 from sqlalchemy import create_engine
@@ -47,6 +48,44 @@ WHERE np.nspname='{0}' and ct.relname='{1}'
         self._engine = None
         self.id = "postgresql://{1}:{2}/{0}".format(self._db,self._host,self._port)
 
+        self._version = None
+        self._pg_client_folder = None
+
+    version_re = re.compile("^\s*(?P<type>[a-z]+)\s+(?P<version>[0-9\.]+).*$",re.IGNORECASE)
+    @property
+    def version(self):
+        if not self._version:
+            version = self.get("SELECT version();")
+            version = [int(i) for i in self.version_re.search(version).group(version).split(".")]
+            self._version = settings.PG_VERSION(version)
+
+        return self._version
+
+    
+    def get_pg_client_command(self,command):
+        if not self._pg_client_folder is None:
+            if BorgConfiguration.PG_CLIENTS:
+                for client in BorgConfiguration.PG_CLIENTS:
+                    self._pg_client_folder = client[1]
+                    if client[0] >= self.version:
+                        break
+            else:
+                self._pg_client_folder = ""
+
+        return os.path.join(self._pg_client_folder,command) if self._pg_client_folder else command
+
+    @property
+    def pg_dump(self):
+        return self.get_pg_client_command("pg_dump")
+
+    @property
+    def pg_restore(self):
+        return self.get_pg_client_command("pg_restore")
+
+    @property
+    def psql(self):
+        return self.get_pg_client_command("psql")
+
     @property
     def database(self):
         return self._db;
@@ -58,7 +97,7 @@ WHERE np.nspname='{0}' and ct.relname='{1}'
                 self._env["PGPASSWORD"] = self._password
             self._env["PGSSLMODE"] = "allow"
 
-            self._table_schema_dump_cmd = [BorgConfiguration.PG_DUMP, "-h", self._host, "-d", self._db, "-U", self._user, "-F", "p", "-w", "-x", "-O", "--no-security-labels", "--no-tablespaces", "-s"]
+            self._table_schema_dump_cmd = [self.pg_dump, "-h", self._host, "-d", self._db, "-U", self._user, "-F", "p", "-w", "-x", "-O", "--no-security-labels", "--no-tablespaces", "-s"]
             if self._port:
                 self._table_schema_dump_cmd += ["-p", str(self._port)]
 
