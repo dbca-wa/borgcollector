@@ -168,7 +168,7 @@ PREVIEW_URL = '/preview/'
 
 UWSGI_CACHE_FALLBACK=True
 
-PG_VERSION = lambda v: client[0][0] * 1000000 + (client[0][1] if len(client[0]) >= 2 else 999) * 1000 + (client[0][2] if len(client[0]) >= 3 else 999)
+PG_VERSION = lambda v: v[0] * 1000000 + (v[1] if len(v) >= 2 else 999) * 1000 + (v[2] if len(v) >= 3 else 999)
 pg_clients = os.environ.get("PG_CLIENTS")
 if pg_clients:
     pg_clients = [ [d for d in v.split("=")]  for v in pg_clients.split(",") if v and v.strip()]

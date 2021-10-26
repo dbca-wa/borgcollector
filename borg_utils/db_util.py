@@ -55,15 +55,15 @@ WHERE np.nspname='{0}' and ct.relname='{1}'
     @property
     def version(self):
         if not self._version:
-            version = self.get("SELECT version();")
-            version = [int(i) for i in self.version_re.search(version).group(version).split(".")]
+            version = self.get("SELECT version();")[0].decode()
+            version = [int(i) for i in self.version_re.search(version).group("version").split(".")]
             self._version = settings.PG_VERSION(version)
 
         return self._version
 
     
     def get_pg_client_command(self,command):
-        if not self._pg_client_folder is None:
+        if self._pg_client_folder is None:
             if BorgConfiguration.PG_CLIENTS:
                 for client in BorgConfiguration.PG_CLIENTS:
                     self._pg_client_folder = client[1]
