@@ -117,9 +117,19 @@ class WmsServer(models.Model,ResourceStatusMixin,TransactionMixin):
             parameters = dict([(p.split("=", 1) if len(p.split("=",1)) == 2 else (p,"")) for p in parameters if p]) 
             default_parameters = {"SERVICE":"WMS","REQUEST":"GetCapabilities","VERSION":"1.1.1"}
             for k,v in default_parameters.iteritems():
-                if not re.compile("{}=".format(k),re.IGNORECASE).search(self.capability_url):
+                found_pk = None
+                for pk,pv in parameters.iteritems():
+                    if k.lower() == pk.lower():
+                        found_pk = pk
+                        break
+                if found_pk:
+                    if k == "VERSION":
+                        setattr(self,"_wms_version",parameters[found_pk])
+                else:
                     parameters[k] = v
-            setattr(self,"_wms_version",parameters["VERSION"])
+                    if k == "VERSION":
+                        setattr(self,"_wms_version",parameters[k])
+                    
             setattr(self,"_capability_url" , "{}?{}".format(url,urllib.urlencode(parameters)))
         return self._capability_url
 
@@ -505,7 +515,10 @@ class WmsLayer(models.Model,ResourceStatusMixin,TransactionMixin):
             meta_data["ows_resource"]["gwc_endpoint"] = self.server.workspace.publish_channel.gwc_endpoint
 
         if self.legend:
-            res = requests.get(self.legend,auth=(self.server.user,self.server.password))
+            if self.server.user:
+                res = requests.get(self.legend,auth=(self.server.user,self.server.password))
+            else:
+                res = requests.get(self.legend)
             res.raise_for_status()
             if "ServiceException" in res.content:
                 raise Exception(res.content)

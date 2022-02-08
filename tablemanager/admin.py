@@ -79,7 +79,7 @@ class JobFields(object):
 
     def _job_message(self,o):
         if o.job_message:
-            return "<p style='white-space:pre'>" + o.job_message + "</p>"
+            return "<p>" + o.job_message + "</p>"
         else:
             return ''
 

@@ -761,13 +761,14 @@ class Input(JobFields,SpatialTableMixin):
                     result = True
                     if job and job.batch_id:
                         #check for harvest, should always check.
-                        for ds in self.datasource:
+                        for ds in self.datasource or []:
                             if os.path.exists(ds):
                                 #data source is a file
                                 if self.job_run_time <= datetime.utcfromtimestamp(os.path.getmtime(ds)).replace(tzinfo=pytz.UTC):
                                     return False
                             else:
                                 result = None
+                                break
                     else:
                         #check for web app. check against "ds_modify_time" which is harvested by harvest job.
                         if self.ds_modify_time:
@@ -1087,6 +1088,9 @@ class Input(JobFields,SpatialTableMixin):
         output = None
         rows_sql = "SELECT count(1) FROM \"{0}\".\"{1}\"".format(schema,self.name)
         try:
+            #drop the current table first
+            cursor.execute("drop table if exists \"{0}.{1}\" CASCADE;".format(schema,self.name))
+
             outputFile = tempfile.NamedTemporaryFile(delete=False)
             errorFile = tempfile.NamedTemporaryFile(delete=False)
             logger.info("Importing data using ogr2ogr, name={},outputFile={},errorFile={}".format(self.name,outputFile.name,errorFile.name))
@@ -1096,7 +1100,6 @@ class Input(JobFields,SpatialTableMixin):
                 sleep_time = 0
                 max_sleep_time = BorgConfiguration.MAX_TEST_IMPORT_TIME * 1000
                 finished = False
-                cursor.execute("drop table if exists \"{0}.{1}\";".format(schema,self.name))
                 rows = 0
                 while sleep_time < max_sleep_time and rows == 0:
                     result = pobj.poll()

@@ -30,7 +30,7 @@ class HarvestDatasource(object):
         delete_style_counter = 0
         for i in Input.objects.filter(foreign_table__isnull=True):
             new_modify_time = None
-            for ds in i.datasource:
+            for ds in i.datasource or []:
                 if os.path.exists(ds):
                     modify_time = datetime.utcfromtimestamp(os.path.getmtime(ds)).replace(tzinfo=pytz.UTC)
                     if new_modify_time:
@@ -41,7 +41,7 @@ class HarvestDatasource(object):
                 else:
                     new_modify_time = None
                     break
-            if i.ds_modify_time != new_modify_time:
+            if not new_modify_time or i.ds_modify_time != new_modify_time:
                 i.ds_modify_time = new_modify_time
                 i.save(update_fields=["ds_modify_time"])
                 counter += 1

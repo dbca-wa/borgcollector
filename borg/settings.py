@@ -16,6 +16,7 @@ import traceback
 
 from django.db import connection
 
+
 BASE_DIR = os.path.dirname(os.path.dirname(__file__))
 
 # define the following in the environment
@@ -83,6 +84,7 @@ AUTHENTICATION_BACKENDS = (
 )
 
 MIDDLEWARE_CLASSES = (
+    'borg.middleware.HealthCheckMiddleware',
     'django.contrib.sessions.middleware.SessionMiddleware',
     'django.middleware.common.CommonMiddleware',
     'django.contrib.auth.middleware.AuthenticationMiddleware',
