@@ -15,14 +15,21 @@ RUN add-apt-repository ppa:ubuntugis/ppa \
 RUN sh -c 'echo "deb http://apt.postgresql.org/pub/repos/apt/ `lsb_release -cs`-pgdg main" >> /etc/apt/sources.list.d/pgdg.list' \
     && wget -q https://www.postgresql.org/media/keys/ACCC4CF8.asc -O - | apt-key add -  \ 
     && apt-get update  \
-    && apt-get install  -y --no-install-recommends postgresql-client-9.6 postgresql-client-10 postgresql-client-11 postgresql-client-12 postgresql-client-13 \
-    && apt-get install  -y --no-install-recommends openssh-client
+    && apt-get install  -y --no-install-recommends postgresql-client-9.6 postgresql-client-10 postgresql-client-11 postgresql-client-12 postgresql-client-13 systemd\
+    && apt-get install  -y --no-install-recommends openssh-server rsync
 
 FROM builder_base_borg as python_libs_borg
 
 RUN groupadd  -g 1001 borg
 RUN useradd -d /home/borg -m -s /bin/bash -u 1001 -g 1001 borg
 RUN useradd -d /home/borgcollector -m -s /bin/bash -u 1002 -g 1001 borgcollector
+
+WORKDIR /etc/ssh
+COPY ssh/sshd_config ./sshd_config
+RUN chown -R borgcollector:root /etc/ssh
+RUN mkdir /run/sshd
+run chown borgcollector:root /run/sshd
+
 
 WORKDIR /etc/mercurial
 COPY mercurial/hgrc ./hgrc

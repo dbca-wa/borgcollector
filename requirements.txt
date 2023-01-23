@@ -11,9 +11,10 @@ python-hglib==2.6.1
 requests==2.22.0
 psycopg2==2.8.3
 pytz==2019.2
-git+git://github.com/rockychen-dpaw/dbca-utils@0.1.1
+git+https://github.com/rockychen-dpaw/dbca-utils@0.1.1
 restless==2.1.1
 django-confy==1.0.4
+greenlet==1.1.2
 gevent==1.4.0
 django-wsgiserver==0.8.0rc1
 django-uwsgi[uwsgi]==0.2.2
