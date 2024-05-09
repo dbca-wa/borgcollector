@@ -532,6 +532,7 @@ class Layer(BorgModel,ResourceStatusMixin,TransactionMixin,SpatialTableMixin):
                 json_out["spatial_data"] = self.is_spatial
                 json_out["channel"] = self.datasource.workspace.publish_channel.name
                 json_out["sync_geoserver_data"] = self.datasource.workspace.publish_channel.sync_geoserver_data
+                json_out["datastore"] = self.datasource.name
 
                 json_out['action'] = "remove"
 
@@ -920,6 +921,7 @@ class SqlViewLayer(BorgModel,ResourceStatusMixin,TransactionMixin,SpatialTableMi
                 json_out["spatial_data"] = self.is_spatial
                 json_out["channel"] = self.datasource.workspace.publish_channel.name
                 json_out["sync_geoserver_data"] = self.datasource.workspace.publish_channel.sync_geoserver_data
+                json_out["datastore"] = self.datasource.name
 
                 json_out['action'] = "remove"
 
@@ -1036,7 +1038,7 @@ class SqlViewLayer(BorgModel,ResourceStatusMixin,TransactionMixin,SpatialTableMi
             json_out = {}
             json_out["name"] = self.kmi_name
             json_out["workspace"] = self.datasource.workspace.name
-            json_out["store"] = self.datasource.name
+            json_out["datastore"] = self.datasource.name
             json_out["action"] = "empty_gwc"
             json_out["publish_time"] = timezone.localtime(timezone.now()).strftime("%Y-%m-%d %H:%M:%S.%f")
 
