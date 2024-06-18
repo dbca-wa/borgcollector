@@ -12,7 +12,7 @@ RUN add-apt-repository ppa:ubuntugis/ppa \
     && apt-get install -y --no-install-recommends wget git libmagic-dev gcc binutils gdal-bin libgdal-dev vim python python-setuptools python-dev python-pip tzdata mercurial less \
     && pip install --upgrade pip
 
-RUN sh -c 'echo "deb http://apt.postgresql.org/pub/repos/apt/ `lsb_release -cs`-pgdg main" >> /etc/apt/sources.list.d/pgdg.list' \
+RUN sh -c 'echo "deb http://apt-archive.postgresql.org/pub/repos/apt/ `lsb_release -cs`-pgdg main" >> /etc/apt/sources.list.d/pgdg.list' \
     && wget -q https://www.postgresql.org/media/keys/ACCC4CF8.asc -O - | apt-key add -  \ 
     && apt-get update  \
     && apt-get install  -y --no-install-recommends postgresql-client-9.6 postgresql-client-10 postgresql-client-11 postgresql-client-12 postgresql-client-13 systemd\
@@ -20,9 +20,12 @@ RUN sh -c 'echo "deb http://apt.postgresql.org/pub/repos/apt/ `lsb_release -cs`-
 
 FROM builder_base_borg as python_libs_borg
 
-RUN groupadd  -g 1001 borg
-RUN useradd -d /home/borg -m -s /bin/bash -u 1001 -g 1001 borg
-RUN useradd -d /home/borgcollector -m -s /bin/bash -u 1002 -g 1001 borgcollector
+RUN groupadd -r -g 1001 borg
+RUN groupadd -r -g 1000 borgcollector
+RUN useradd -l -m -d /home/borg          -s /bin/bash -u 1001 -g 1001 -G borg borg
+RUN useradd -l -m -d /home/borgcollector -s /bin/bash -u 1000 -g 1001 -G borg,borgcollector borgcollector
+RUN usermod -p '*' borg
+RUN usermod -p '*' borgcollector
 
 WORKDIR /etc/ssh
 COPY ssh/sshd_config ./sshd_config

@@ -597,9 +597,9 @@ class WmsLayer(models.Model,ResourceStatusMixin,TransactionMixin):
 
     def json_filename(self,action='publish'):
         if action in ['publish','unpublish']:
-            return os.path.join(self.server.workspace.publish_channel.name,"wms_layers", "{}.{}.json".format(self.server.workspace.name, self.name))
+            return os.path.join(self.server.workspace.publish_channel.name,"wms_layers", "{}.{}.json".format(self.server.name, self.name.replace(":","_").replace(" ","_")))
         else:
-            return os.path.join(self.server.workspace.publish_channel.name,"wms_layers", "{}.{}.{}.json".format(self.server.workspace.name, self.name,action))
+            return os.path.join(self.server.workspace.publish_channel.name,"wms_layers", "{}.{}.{}.json".format(self.server.name, self.name.replace(":","_").replace(" ","_"),action))
 
     def json_filename_abs(self,action='publish'):
         return os.path.join(BorgConfiguration.BORG_STATE_REPOSITORY, self.json_filename(action))
