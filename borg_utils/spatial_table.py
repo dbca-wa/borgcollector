@@ -4,8 +4,10 @@ from .db_util import defaultDbUtil
 import random
 import json
 import traceback
+import logging
 import hashlib
 
+logger = logging.getLogger(__name__)
 
 def hashcode(text):
     m = hashlib.md5()
@@ -121,10 +123,12 @@ class SpatialTable(object):
                 rows = self._dbUtil.query(SpatialTable._get_geography_columns_sql.format(self._dbUtil.database,self._schema,self._table))
                 self._spatial_info[1] = [[x[0],x[1],None,None] for x in rows]
                 
-                rows = self._dbUtil.query(SpatialTable._get_raster_columns_sql.format(self._dbUtil.database,self._schema,self._table))
-                self._spatial_info[2] = [[x[0],None,None,None] for x in rows]
-    
-    
+                try:
+                    rows = self._dbUtil.query(SpatialTable._get_raster_columns_sql.format(self._dbUtil.database,self._schema,self._table))
+                    self._spatial_info[2] = [[x[0],None,None,None] for x in rows]
+                except Exception as ex:
+                    logger.error("Failed to fetch the raster column info.{}".format(str(ex)))
+                    self._spatial_info[2] = []
     
             if self._sql or bbox:
                 self._retrieve_bbox()
