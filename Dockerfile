@@ -15,7 +15,7 @@ RUN add-apt-repository ppa:ubuntugis/ppa \
 RUN sh -c 'echo "deb http://apt-archive.postgresql.org/pub/repos/apt/ `lsb_release -cs`-pgdg main" >> /etc/apt/sources.list.d/pgdg.list' \
     && wget -q https://www.postgresql.org/media/keys/ACCC4CF8.asc -O - | apt-key add -  \ 
     && apt-get update  \
-    && apt-get install  -y --no-install-recommends postgresql-client-9.6 postgresql-client-10 postgresql-client-11 postgresql-client-12 postgresql-client-13 systemd\
+    && apt-get install  -y --no-install-recommends postgresql-client-9.6 postgresql-client-10 postgresql-client-11 postgresql-client-12 postgresql-client-13 postgresql-client-15 systemd\
     && apt-get install  -y --no-install-recommends openssh-server rsync
 
 FROM builder_base_borg as python_libs_borg
