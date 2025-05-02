@@ -15,7 +15,7 @@ git+https://github.com/rockychen-dpaw/dbca-utils@0.1.1
 restless==2.1.1
 django-confy==1.0.4
 greenlet==1.1.2
-gevent==1.4.0
+gevent==25.4.1
 django-wsgiserver==0.8.0rc1
 django-uwsgi[uwsgi]==0.2.2
 django-uwsgi-cache==1.0.1
